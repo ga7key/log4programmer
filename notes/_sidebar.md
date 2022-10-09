@@ -1,2 +1,2 @@
-* [个人笔记](others/README.md)
-* [数据库](others/database.md)
+* [个人笔记](notes/README.md)
+* [数据库](notes/database.md)

@@ -1,6 +1,6 @@
 #### CPU与内存问题排查  
 
-### 通过CPU占用定位
+### CPU高占用定位
 1.使用top命令，查看CPU占用情况，找到Java的pid(进程id)  
 ![top](../images/jvm/2023-08-14_201514.png)  
 2.使用ps -mp命令将这个pid下线程占用cpu情况查出来，找到高占用的tid(线程id)，ps -mp 'pid' -o THREAD,tid,time  
@@ -10,7 +10,7 @@
 4.使用jstack通过pid和tid查找线程的运行状态，jstack 'pid' |grep 'tid' >> problem.log  
 ![jstackGrep](../images/jvm/2023-08-14_212059.png)  
 
-### 通过内存占用定位
+### 内存高占用定位
 1.使用jmap命令手动生成堆转储快照(dump文件)。jmap -dump:format=b,file='dumpFileName' 'pid'  
     例：jmap -dump:format=b,file=/logFile/dump.dat 3334  
 2.使用内存工具分析MAT、jvisualvm等进行分析。以MAT为例：  

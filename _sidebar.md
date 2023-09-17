@@ -6,5 +6,4 @@
     * [ASCII码对照表](characterEncoding/ASCII.md)
 <!-- Others -->
 * [其它](others/)
-
 * [笔记](notes/)

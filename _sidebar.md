@@ -2,6 +2,7 @@
 * Spring Cloud
     * [Actuator](springcloud/actuator.md)
 * [JVM](jvm/cpuMemoryHandle.md)
+* [算法](algorithm/dataStructure.md)
 * 字符编码
     * [ASCII码对照表](CharacterEncoding/ASCII.md)
 <!-- Others -->

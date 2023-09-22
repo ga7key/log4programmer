@@ -31,3 +31,13 @@ BeanDefinition类继承图
 &emsp;&emsp;在解析之前，如果xml文件中存在字符串“DOCTYPE”就是DTD校验方式，否则就是XSD校验方式。对不同校验类型的xml文件，Spring分别准备了不同的解析器去校验它们，BeansDtdResolver负责获取DTD的声明文件，PluggableSchemaResolver负责获取XSD的声明文件。具体如何根据DTD或XSD的解析器去校验xml文件，那就要交给DOM相关的API去校验了。  
 &emsp;&emsp;Document中的元素解析任务都交给BeanDefinitionParserDelegate来处理，对默认标签和自定义标签的解析需要分别处理。首先会初步解析bean标签的一些属性（如id、name、class、parent）并创建BeanDefinition的实现类GenericBeanDefinition，用于存放bean标签解析结果。然后Spring会解析bean标签的其它属性（如singleton、lazy-init、depends-on等）和bean的子标签及属性。  
 &emsp;&emsp;Spring容器其实就是Map（beanDefinitionMap），它是多线程安全类型的ConcurrentHashMap，将bean注册到Spring容器中的过程，就是以bean的名称为key，以bean对应的BeanDefinition为value注册到beanDefinitionMap中。  
+
+
+### ApplicationContext初始化的核心方法
+![refresh](../images/spring/2023-09-21_refresh().png ':size=70%')
+
+### Spring高级容器初始化
+![Spring高级容器初始化](../images/spring/2023-09-21_spring高级容器初始化.png)
+
+### bean加载流程
+![bean加载](../images/spring/2023-09-22_bean加载.png)

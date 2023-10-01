@@ -41,3 +41,14 @@ BeanDefinition类继承图
 
 ### bean加载流程
 ![bean加载](../images/spring/2023-09-22_bean加载.png)
+
+### 注解
+
+#### 注解的本质
+注解的本质就是继承了Annotation接口的接口。  
+
+### Spring解析@Component
+![Spring解析@Component](../images/spring/2023-09-24_Spring解析@Component.png)
+
+### Spring解析@Configuration和@Bean
+![Spring解析@Configuration和@Bean](../images/spring/2023-09-24_Spring解析@Configuration和@Bean.png)

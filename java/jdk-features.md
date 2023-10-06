@@ -52,7 +52,172 @@
 
 - 响应式流（Reactive Streams）API - Java 9中引入了新的响应式流 API 来支持 Java 9 中的响应式编程。
 
-
 ### JDK10 新特性
 
 - 局部变量类型推断（Local-Variable Type Inference）
+
+- 将JDK资料整合到单个存储库中（Consolidate the JDK Forest into a Single Repository）
+
+- 垃圾回收器接口（Garbage Collector Interface）- 通过引入简明的垃圾收集器(GC)接口，改进不同垃圾收集器的源代码隔离。
+
+- G1的并行Full GC（Parallel Full GC for G1）- 通过使Full GC并行来改善G1最坏情况延迟。
+
+- 应用程序类数据共享（Application Class-Data Sharing）- 为了改进启动和内存占用，可以扩展现有的类-数据共享(“CDS”)特性，以允许将应用程序类放在共享存档中。
+
+- 局部线程握手协议（Thread-Local Handshakes）- 引入一种在线程上执行回调而不执行全局VM安全点的方法。使停止单个线程(而不是停止所有线程或不停止)成为可能且成本低廉。
+
+- 删除javah（Remove the Native-Header Generation Tool (javah)）- 从JDK中删除javah工具。
+
+- 额外的Unicode语言标签扩展（Additional Unicode Language-Tag Extensions）- 增强java.util.Locale和相关api，以实现BCP 47语言标记的额外Unicode扩展。
+
+- 可选内存设备上的堆分配（Heap Allocation on Alternative Memory Devices）- 启用HotSpot VM在用户指定的替代内存设备(如NV-DIMM)上分配Java对象堆。
+
+- 实验性的基于java的JIT编译器（Experimental Java-Based JIT Compiler）- 启用基于java的JIT编译器Graal作为Linux/x64平台上的实验性JIT编译器。
+
+- 根证书（Root Certificates）- 在JDK中提供一组默认的根证书机构(CA)颁发证书。
+
+### JDK11 新特性
+
+- 改进Aarch64的固有函数（Improve Aarch64 Intrinsics）- 改进现有的字符串和数组的固有函数，并在AArch64处理器上为java.lang.Math的sin、cos和log函数实现新的固有函数。
+
+- 删除Java EE和CORBA模块（Remove the Java EE and CORBA Modules）
+
+- HTTP Client - Java 11后开始支持HTTP2，底层进行了大幅度的优化，并且现在完全支持异步非阻塞。
+
+- Lambda参数的局部变量语法（Local-Variable Syntax for Lambda Parameters）- 允许在声明隐式类型化lambda表达式的形式参数时使用var。
+
+- 支持Unicode 10版本
+
+- 飞行记录仪（Flight Recorder）- 提供低开销的数据收集框架，用于对Java应用程序和HotSpot JVM进行故障排除。
+
+- 启动单文件源代码程序（Launch Single-File Source-Code Programs）- 增强java启动器以运行作为单个java源代码文件提供的程序，包括通过“shebang”文件和相关技术从脚本中使用程序。
+
+- 低开销堆分析（Low-Overhead Heap Profiling）- 提供一种低开销的Java堆分配抽样方法，可通过JVMTI访问。
+
+- 实现传输层安全协议1.3（Transport Layer Security (TLS) 1.3）
+
+- 试验地引入ZGC
+
+- 弃用Nashorn JavaScript引擎
+
+- 弃用Pack200工具和API
+
+### JDK12 新特性
+
+- 试验地引入Shenandoah低暂停垃圾回收器
+
+- 微基准测试套件（Microbenchmark Suite）- 向JDK源代码中添加一套基本的微基准测试，使开发人员可以轻松地运行现有的微基准测试并创建新的微基准测试。
+
+- Switch表达式(预览版)
+
+- JVM常量API（JVM Constants API）- 引入一个API来对关键类文件和运行时工件(特别是可从常量池加载的常量)的标称描述进行建模。
+
+- 保留一个AArch64端口 - 删除与arm64端口相关的所有源代码，同时保留32位ARM端口和64位aarch64端口。
+
+- 默认的CDS档案（Default CDS Archives）- 增强JDK构建过程，在64位平台上使用默认类列表生成类数据共享(CDS，class data-sharing)归档。
+
+- G1的可中止混合回收（Abortable Mixed Collections for G1）- 如果G1混合回收可能超过预设的暂停时间，则使其可中止。
+
+- G1快速释放已申请但未使用的内存（Promptly Return Unused Committed Memory from G1）- 增强G1垃圾收集器，以便在空闲时自动将Java堆内存返回给操作系统。
+
+### JDK13 新特性
+
+- 动态CDS档案（Dynamic CDS Archives）- 扩展应用程序类数据共享，允许在Java应用程序执行结束时对类进行动态归档。归档的类将包括所有加载的应用程序类和库类，这些类没有出现在默认的基础层CDS归档中。
+
+- 试验地增强ZGC - 增强ZGC以将未使用的堆内存返回给操作系统。
+
+- 重新实现旧 Socket API（Reimplement the Legacy Socket API）- 将java.net.Socket和java.net.ServerSocket api使用的底层实现替换为更简单、更现代、易于维护和调试的实现。新的实现将更适用于用户模式线程（也就是纤程），目前正在Project Loom中进行探索。
+
+- Switch表达式(第二次预览版)
+
+- 文本块（Text Blocks）(预览版)
+
+### JDK14 新特性
+
+- instanceof的匹配模式（Pattern Matching for instanceof）(预览版)
+
+- 打包工具(孵化器)
+
+- G1的NUMA-Aware内存分配（NUMA-Aware Memory Allocation for G1）- 通过实现非均匀内存访问感知的内存分配来提高大型机器上的G1性能。
+
+- JFR事件流（JFR Event Streaming）- 公开JDK Flight Recorder数据以进行持续监控。
+
+- 非易失性映射字节缓冲区（Non-Volatile Mapped Byte Buffers）- 添加新的特定于jdk的文件映射模式，以便FileChannel API可以用于创建引用非易失性内存的MappedByteBuffer实例。
+
+- 实用的NullPointerExceptions - 通过精确描述哪个变量为空，提高JVM生成的NullPointerExceptions的可用性。
+
+- Records(预览版) - 提供了一种紧凑的语法，声明贫血的、不可变数据的类。
+
+- Switch表达式
+
+- 弃用Solaris和SPARC端口
+
+- 删除并发标记扫描(CMS)垃圾收集器
+
+- 试验地将ZGC垃圾回收器移植到macOS和Windows
+
+- 弃用parallelscscraper + SerialOld GC组合
+
+- 删除Pack200 Tools和API
+
+- 文本块（Text Blocks）(第二次预览版)
+
+- 外部内存访问API(孵化器) - 引入一个API，允许Java程序安全有效地访问Java堆之外的外部内存。
+
+### JDK15 新特性
+
+- 密封类（Sealed Classes）(预览版) - 密封类和接口限制了哪些其他类或接口可以扩展或实现它们。
+
+- 隐藏类（Hidden Classes）- 隐藏类不能被其他类的字节码直接使用。隐藏类是为在运行时生成类并通过反射间接使用它们的框架所使用的。隐藏类可以定义为访问控制嵌套的成员，并且可以独立于其他类卸载。
+
+- 移除Nashorn JavaScript引擎
+
+- 重新实现旧的DatagramSocket API - 将java.net.DatagramSocket和java.net.MulticastSocket api的底层实现替换为更简单、更现代、易于维护和调试的实现。新的实现将很容易适应虚拟线程的工作，目前正在Project Loom中进行探索。
+
+- 废弃并禁用偏向锁（Deprecate and Disable Biased Locking）
+
+- instanceof的匹配模式（Pattern Matching for instanceof）(第二次预览)
+
+- ZGC（可伸缩的低延迟垃圾收集器）
+
+- 文本块（Text Blocks）
+
+- Shenandoah（一个低暂停的垃圾收集器）
+
+- 删除Solaris和SPARC端口
+
+- 外部内存访问API(第二次孵化) - 引入一个API，允许Java程序安全有效地访问Java堆之外的外部内存。
+
+- Records(第二次预览) - 提供了一种紧凑的语法，声明贫血的不可变数据的类。
+
+- 废弃RMI激活机制（Deprecate RMI Activation for Removal）
+
+### JDK16 新特性
+
+- 向量的API（Vector API）(孵化器) - 提供孵化器模块的初始迭代。jdk.incubator.vector，表示在运行时可靠地在支持的CPU架构上编译为最优矢量硬件指令的矢量计算，从而获得优于等效标量计算的性能。
+
+- 启用c++ 14语言特性（Enable C++14 Language Features）- 允许在JDK c++源代码中使用c++ 14语言特性，并对HotSpot代码中可以使用哪些特性给出具体的指导。
+
+- 从Mercurial迁移到Git，Github（Migrate from Mercurial to Git，GitHub）
+
+- ZGC并发线程栈处理（ZGC: Concurrent Thread-Stack Processing）- 将ZGC线程堆栈处理从安全点移到并发阶段。
+
+- unix域套接字通道（Unix-Domain Socket Channels）- 在java.nio.channels包中为socket channel和server-socket channel api添加unix域(AF_UNIX)套接字支持。扩展继承的通道机制以支持unix域套接字通道和服务器套接字通道。
+
+- 弹性元空间（Elastic Metaspace）- 将未使用的HotSpot类元数据(即元空间)内存更及时地返回给操作系统，减少元空间占用，简化元空间代码，从而降低维护成本。
+
+- 外部链接器API（Foreign Linker API）- 引入一个API，提供对native代码的静态类型纯java访问。这个API与外部内存API (JEP 393)一起，将大大简化绑定到本机库的过程，否则容易出错。
+
+- 对基于值的类的警告（Warnings for Value-Based Classes）- 将基础类型包装类指定为基于值的类，并弃用它们的构造函数以移除，从而提示新的弃用警告。对于在Java平台中任何基于值的类的实例上进行不正确的同步尝试，提供警告。
+
+- 打包工具（Packaging Tool）- 提供jpackage工具，用于打包自包含的Java应用程序。
+
+- 外部内存访问API(第三次次孵化) - 引入一个API，允许Java程序安全有效地访问Java堆之外的外部内存。
+
+- instanceof的匹配模式（Pattern Matching for instanceof）- 匹配模式合并了判断、强制类型转换操作，以更简洁和安全的方式表达。
+
+- Records - 提供了一种紧凑的语法，声明贫血的、不可变数据的类。
+
+- 默认强封装JDK内部组件（Strongly Encapsulate JDK Internals by Default）- 默认情况下，强封装JDK的所有内部元素，但关键的内部api(如sun.misc.Unsafe)除外。允许最终用户选择宽松的强封装（JDK9以来的默认设置）。
+
+- 密封类（Sealed Classes）(第二次预览) - 密封类和接口限制了哪些其他类或接口可以扩展或实现它们。

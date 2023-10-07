@@ -190,11 +190,11 @@
 
 - Records(第二次预览) - 提供了一种紧凑的语法，声明贫血的不可变数据的类。
 
-- 废弃RMI激活机制（Deprecate RMI Activation for Removal）
+- 弃用RMI激活机制以备废除（Deprecate RMI Activation for Removal）
 
 ### JDK16 新特性
 
-- 向量的API（Vector API）(孵化器) - 提供孵化器模块的初始迭代。jdk.incubator.vector，表示在运行时可靠地在支持的CPU架构上编译为最优矢量硬件指令的矢量计算，从而获得优于等效标量计算的性能。
+- 矢量的API（Vector API）(孵化器) - 提供孵化器模块的初始迭代。jdk.incubator.vector，表示在运行时可靠地在支持的CPU架构上编译为最优矢量硬件指令的矢量计算，从而获得优于等效标量计算的性能。
 
 - 启用c++ 14语言特性（Enable C++14 Language Features）- 允许在JDK c++源代码中使用c++ 14语言特性，并对HotSpot代码中可以使用哪些特性给出具体的指导。
 
@@ -221,3 +221,101 @@
 - 默认强封装JDK内部组件（Strongly Encapsulate JDK Internals by Default）- 默认情况下，强封装JDK的所有内部元素，但关键的内部api(如sun.misc.Unsafe)除外。允许最终用户选择宽松的强封装（JDK9以来的默认设置）。
 
 - 密封类（Sealed Classes）(第二次预览) - 密封类和接口限制了哪些其他类或接口可以扩展或实现它们。
+
+### JDK17 新特性
+
+- 恢复始终严格的浮点语义（Restore Always-Strict Floating-Point Semantics）- 使浮点操作始终严格，而不是同时具有严格的浮点语义(strictfp)和略有不同的默认浮点语义。这将恢复语言和VM的原始浮点语义，与Java SE 1.2中引入严格和默认浮点模式之前的语义相匹配。
+
+- 增强的伪随机数生成器（Enhanced Pseudo-Random Number Generators）- 为伪随机数生成器(PRNG)提供新的接口类型和实现，包括可跳转PRNG和另一类可分割PRNG算法(LXM)。
+
+- 新的macOS渲染管道（New macOS Rendering Pipeline）- 使用Apple Metal API为macOS实现一个Java 2D内部渲染管道，作为现有管道的替代方案。
+
+- macOS/AArch64 Port
+
+- 弃用Applet API以备废除（Deprecate the Applet API for Removal）
+
+- 强封装JDK内部（Strongly Encapsulate JDK Internals）- 强烈封装JDK的所有内部元素，除了关键的内部api(如sun.misc.Unsafe)。不再可能像JDK 9到JDK 16那样，通过单个命令行选项放松对内部元素的强封装。
+
+- switch模式匹配（Pattern Matching for switch）(预览版) - 将模式匹配扩展到switch允许针对多个模式对表达式进行测试，每个模式都有一个特定的操作，这样就可以简明而安全地表达复杂的面向数据的查询。
+
+- 移除RMI激活（Remove RMI Activation）
+
+- 密封类（Sealed Classes）- 密封类和接口限制了哪些其他类或接口可以扩展或实现它们。
+
+- 删除实验性AOT和JIT编译器（Remove the Experimental AOT and JIT Compiler）
+
+- 弃用安全管理器以备废除（Deprecate the Security Manager for Removal）
+
+- 外部函数和内存API（Foreign Function & Memory API）(孵化器) - 引入一个API，通过该API, Java程序可以与Java运行时之外的代码和数据进行互操作。通过有效地调用外部函数(即JVM外部的代码)和安全地访问外部内存(即JVM不管理的内存)，API使Java程序能够调用本机库并处理本机数据，而不会出现JNI的脆弱性和危险。
+
+- 矢量的API（Vector API）(第二次孵化) - 引入API来表达矢量计算，在运行时可靠地在支持的CPU架构上编译为最优矢量指令，从而实现优于等效标量计算的性能。
+
+- 上下文特定的反序列化过滤器（Context-Specific Deserialization Filters）- 允许应用程序通过jvm范围的过滤器工厂配置上下文特定的和动态选择的反序列化过滤器，该过滤器工厂被调用以为每个单独的反序列化操作选择过滤器。
+
+### JDK18 新特性
+
+- 默认的UTF-8字符集（UTF-8 by Default）- 指定UTF-8作为标准Java api的默认字符集。通过此更改，依赖于默认字符集的api将在所有实现、操作系统、语言环境和配置中保持一致。
+
+- 简易Web服务器（Simple Web Server）- 提供一个命令行工具来启动一个只提供静态文件的最小web服务器。没有CGI或类似servlet的功能可用。这个工具对于原型设计、特别编码和测试非常有用，特别是在教育环境中。
+
+- Java API文档中的代码片段（Code Snippets in Java API Documentation）- 为JavaDoc的Standard Doclet引入@snippet标记，以简化在API文档中包含示例源代码的过程。
+
+- 用方法句柄重新实现核心反射（Reimplement Core Reflection with Method Handles）- 在 java.lang.invoke 的方法句柄之上，重构 java.lang.reflect的方法、构造函数和字段，使用方法句柄处理反射的底层机制将减少 java.lang.reflect 和 java.lang.invoke 两者的 API 维护和开发成本。
+
+- 矢量的API（Vector API）(第三次孵化) - 引入API来表达矢量计算，在运行时可靠地在支持的CPU架构上编译为最优矢量指令，从而实现优于等效标量计算的性能。
+
+- 互联网地址解析SPI（Internet-Address Resolution SPI）- 为主机名和地址解析定义一个服务提供者接口(SPI)，以便java.net.InetAddress可以使用平台内置解析器以外的解析器。
+
+- 外部函数和内存API（Foreign Function & Memory API）(第二次孵化) - 引入一个API，通过该API, Java程序可以与Java运行时之外的代码和数据进行互操作。通过有效地调用外部函数(即JVM外部的代码)和安全地访问外部内存(即JVM不管理的内存)，API使Java程序能够调用本机库并处理本机数据，而不会出现JNI的脆弱性和危险。
+
+- switch模式匹配（Pattern Matching for switch）(第二次预览) - 将模式匹配扩展到switch允许针对多个模式对表达式进行测试，每个模式都有一个特定的操作，这样就可以简明而安全地表达复杂的面向数据的查询。
+
+- 弃用Finalization以备删除（Deprecate Finalization for Removal）- Finalization旨在帮助避免资源泄漏问题，然而这个功能存在延迟不可预测、行为不受约束，以及线程无法指定等缺陷，导致其安全性、性能、可靠性和可维护性方面都存在问题，因此将其弃用，用户可选择迁移到其他资源管理技术，例如try-with-resources语句和清理器。
+
+### JDK19 新特性
+
+- Record模式（Record Patterns）(预览版) - 可以嵌套Record模式和Type模式，以支持强大的、声明性的和可组合的数据导航和处理形式。
+
+- Linux/RISC-V Port
+
+- 外部函数和内存API（Foreign Function & Memory API）(预览版) - 引入一个API，通过该API, Java程序可以与Java运行时之外的代码和数据进行互操作。通过有效地调用外部函数(即JVM外部的代码)和安全地访问外部内存(即JVM不管理的内存)，API使Java程序能够调用本机库并处理本机数据，而不会出现JNI的脆弱性和危险。
+
+- 虚拟线程（Virtual Threads）(预览版) - 向Java平台引入虚拟线程。虚拟线程是轻量级线程，可以显著减少编写、维护和观察高吞吐量并发应用程序的工作量。
+
+- 矢量的API（Vector API）(第四次孵化) - 引入API来表达矢量计算，在运行时可靠地在支持的CPU架构上编译为最优矢量指令，从而实现优于等效标量计算的性能。
+
+- switch模式匹配（Pattern Matching for switch）(第三次预览) - 将模式匹配扩展到switch允许针对多个模式对表达式进行测试，每个模式都有一个特定的操作，这样就可以简明而安全地表达复杂的面向数据的查询。
+
+- 结构化并发性（Structured Concurrency）(孵化器) - 通过引入结构化并发的API来简化多线程编程。结构化并发将在不同线程中运行的多个任务视为单个工作单元，从而简化了错误处理和取消，提高了可靠性并增强了可观察性。
+
+### JDK21 新特性
+
+- 字符串模板（String Templates）(预览版)- 字符串模板通过将文本与嵌入表达式和模板处理器耦合来产生专门的结果，从而补充了Java现有的字符串文字和文本块。
+
+- 序列化集合（Sequenced Collections）- 引入新的接口来表示具有定义的相遇顺序的集合。每个这样的集合都有定义良好的第一个元素、第二个元素，依此类推，直到最后一个元素。它还提供了统一的api来访问它的第一个和最后一个元素，并以相反的顺序处理它的元素。
+
+- ZGC分代（Generational ZGC）- 通过扩展Z Garbage Collector(ZGC)来为年轻对象和老对象维护单独的代，从而提高应用程序性能。这将允许ZGC更频繁地收集年轻的对象——它们往往会在年轻时死亡。
+
+- Record模式（Record Patterns）- 可以嵌套Record模式和Type模式，以支持强大的、声明性的和可组合的数据导航和处理形式。
+
+- switch模式匹配（Pattern Matching for switch）- 将模式匹配扩展到switch允许针对多个模式对表达式进行测试，每个模式都有一个特定的操作，这样就可以简明而安全地表达复杂的面向数据的查询。
+
+- 外部函数和内存API（Foreign Function & Memory API）(第三次预览) - 引入一个API，通过该API, Java程序可以与Java运行时之外的代码和数据进行互操作。通过有效地调用外部函数(即JVM外部的代码)和安全地访问外部内存(即JVM不管理的内存)，API使Java程序能够调用本机库并处理本机数据，而不会出现JNI的脆弱性和危险。
+
+- 未命名模式和变量（Unnamed Patterns and Variables）- 未命名模式匹配记录组件而不声明组件的名称或类型，以及未命名变量，这些变量可以初始化但不能使用。两者都由下划线_表示。
+
+- 虚拟线程（Virtual Threads）- 向Java平台引入虚拟线程。虚拟线程是轻量级线程，可以显著减少编写、维护和观察高吞吐量并发应用程序的工作量。
+
+- 未命名类和实例主方法（Unnamed Classes and Instance Main Methods）(预览版) - 发展Java语言，使学生可以编写他们的第一个程序，而不需要了解为大型程序设计的语言特性。学生不必使用单独的Java方言，而是可以为单类程序编写精简的声明，然后随着技能的提高，无缝地扩展程序，使用更高级的功能。
+
+- 作用域值（Scoped Values）(预览版) - 引入有作用域的值，这些值可以在不使用方法参数的情况下安全有效地共享给方法。它们比线程局部变量更可取，特别是在使用大量虚拟线程时。实际上，作用域值是隐式方法参数。这就“好像”调用序列中的每个方法都有一个额外的、不可见的参数。没有任何方法声明这个参数，只有能够访问作用域值对象的方法才能访问它的值(数据)。有作用域的值可以通过一系列中间方法将数据从调用者安全地传递给远程被调用者，这些中间方法不为数据声明参数，也不能访问数据。
+
+- 矢量的API（Vector API）(第六次孵化) - 引入API来表达矢量计算，在运行时可靠地在支持的CPU架构上编译为最优矢量指令，从而实现优于等效标量计算的性能。
+
+- 弃用Windows 32位x86端口以备废除（Deprecate the Windows 32-bit x86 Port for Removal）
+
+- 准备禁止动态加载代理（Prepare to Disallow the Dynamic Loading of Agents）- 在将代理动态加载到正在运行的JVM中时发出警告。这些警告的目的是让用户为将来的版本做好准备，该版本默认情况下不允许动态加载代理，以便在默认情况下提高完整性。在启动时加载代理的可服务性工具不会在任何版本中发出警告。
+
+- 密钥封装机制API（Key Encapsulation Mechanism API）- 引入密钥封装机制(kem)的API，这是一种使用公钥加密保护对称密钥的加密技术。
+
+- 结构化并发性（Structured Concurrency）(预览版) - 通过引入结构化并发的API来简化多线程编程。结构化并发将在不同线程中运行的多个任务视为单个工作单元，从而简化了错误处理和取消，提高了可靠性并增强了可观察性。

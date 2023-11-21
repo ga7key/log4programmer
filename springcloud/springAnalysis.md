@@ -53,6 +53,19 @@ BeanDefinition类继承图
 ### Spring解析@Configuration和@Bean
 ![Spring解析@Configuration和@Bean](../images/spring/2023-09-24_Spring解析@Configuration和@Bean.png)
 
+### Spring AOP代理的创建流程
+![AOP代理的创建流程](../images/spring/2023-11-22_AOP代理的创建流程.png)
+
+### Spring中的设计模式
+- 工厂模式：Spring使用工厂模式，通过BeanFactory和ApplicationContext来创建对象。
+- 单例模式：Bean默认为单例模式。
+- 策略模式：例如Resource的实现类，针对不同的资源文件，实现了不同方式的资源获取策略；在选择JDK动态代理或cglib动态代理时，会根据配置的启用优化策略、目标没有基于代理类、目标没有实现接口这几个条件，采用cglib动态代理，这也是策略模式。
+- 代理模式：Spring AOP通过JDK的动态代理或CGLIB实现AOP代理，从而实现代理的功能。
+- 模板方法：可以将相同部分的代码放在父类中，而将不同的代码放入不同的子类中，用来解决代码重复的问题。比如RestTemplate, JmsTemplate, JpaTemplate；Spring AOP在Advice中使用了模板方法模式，每个Advice都是一个模板方法，具体的业务逻辑需要用户自定义并重写其中的方法。
+- 观察者模式: 在Spring AOP中，拦截器和通知之间就应用了观察者模式。
+- 前置处理器模式: Spring AOP支持基于注解的切面声明，通过使用@Aspect注解和@Component注解组合使用，就可以实现一个简单的前置处理器模式。
+- 责任链模式：Spring AOP通过递归调用ReflectiveMethodInvocation的方式，将所有的拦截器组成了一条调用链。
+
 ### SpringMVC工作流程
 ![SpringMVC工作流程](../images/spring/2023-10-09_SpringMVC工作流程.png ':size=60%')  
 

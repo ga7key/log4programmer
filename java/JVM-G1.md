@@ -102,7 +102,7 @@ G1通过 refill_waste 的值来判断TLAB的空间是否填满，可以通过 -X
 - **慢速分配**：如果一个线程的TLAB空间用完，那么该线程将从Eden区剩余的共享部分继续分配内存。这种情况下就需要进行同步处理，以确保多个线程同时分配内存时不会发生冲突。因此，这种方式被称为慢速分配。
 
 #### 对象分配流程
-![object_distribute](../images/jvm/2023-12-07_object_distribute.png ':size=50%')  
+![object_allocate](../images/jvm/2023-12-07_object_allocate.png ':size=50%')  
 1. TLAB剩余内存太小，无法分配对象，会有不同情况，要么是大于refill_waste，直接走堆内存分配，不走TLAB了，要么是小于refill_waste，但是TLAB剩余内存空间不够，这个时候会重新分配一个TLAB来用
 2. 如果通过CAS分配新的TLAB后，就可以为对象分配空间，如果失败，就会进行堆加锁分配TLAB，如果分配TLAB成功，则可以为对象提供空间
 3. 如果不能进行堆加锁分配TLAB，此时就会尝试去扩展分区，也就是再申请一些新的region。如果成功，就分配TLAB，为新创建的对象提供内存空间；如果不成功，就会进行垃圾回收
@@ -118,4 +118,23 @@ G1通过 refill_waste 的值来判断TLAB的空间是否填满，可以通过 -X
 1. 对象的大小超过了PretenureSizeThreshold参数设置的阈值
 2. 对象的大小超过了某个特定的内部阈值（会根据堆内存的大小、应用的行为以及其他一些因素来动态确定，例如：大于heapRegionSize/2）  
 这样G1会将其视为大对象并使用Humongous Region进行管理  
-![bigObject_distribute](../images/jvm/2023-12-07_bigObject_distribute.png ':size=50%')
+![bigObject_allocate](../images/jvm/2023-12-07_bigObject_allocate.png ':size=50%')
+
+#### 最终分配尝试
+![object_fullgc](../images/jvm/2023-12-08_object_fullgc.png ':size=40%')
+
+### 对象分配的源码流程
+#### new一个对象的流程
+![create_object](../images/jvm/2023-12-11_create_object.png)
+
+#### TLAB的快速分配流程
+![tlab_fast_allocate](../images/jvm/2023-12-11_tlab_fast_allocate.png ':size=70%')
+
+#### TLAB无法快速分配，进行重新分配流程
+![tlab_slow_allocate](../images/jvm/2023-12-11_tlab_slow_allocate.png)
+
+#### 堆内存加锁分配TLAB流程
+![tlab_slow_allocate2](../images/jvm/2023-12-11_tlab_slow_allocate2.png)
+
+#### 多次尝试分配TLAB失败，在eden中分配对象的流程
+![tlab_slow_allocate3](../images/jvm/2023-12-11_tlab_slow_allocate3.png)

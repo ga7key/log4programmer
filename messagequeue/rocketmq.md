@@ -35,18 +35,24 @@
 
 这一行内容就是用runbroker.sh脚本来启动一个JVM进程，JVM进程刚开始执行的main类就是org.apache.rocketmq.broker.BrokerStartup  
 runbroker.sh脚本中就是为启动Broker设置对应的JVM参数和其他一些参数：
-- -server ：采用服务器模式
-- -Xms8g -Xmx8g -Xmn4g ：堆内存初始大小为8G，最大大小为8G，年轻代大小为4G
-- -XX:+UseG1GC -XX:G1HeapRegionSize=16m ：采用G1垃圾回收器，每个region大小为16M
-- -XX:G1ReservePercent=25 ：表示预留堆内存的25%作为空闲分区
-- -XX:InitiatingHeapOccupancyPercent=30 ：表示当年轻代占用的堆内存达到总堆内存的30%时，就会触发并发标记周期，提高了gc频率，避免垃圾对象过多
-- -XX:SoftRefLRUPolicyMSPerMB=0 ：表示每个MB堆内存中的软引用对象可以存活0毫秒。避免频繁回收一些软引用的Class对象，这里可以调整为1000
-- -verbose:gc -Xloggc:/dev/shm/mq_gc_%p.log -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintAdaptiveSizePolicy -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=5 -XX:GCLogFileSize=30m ：这些参数都是控制GC日志打印输出的，指定gc日志文件的地址，要打印哪些详细信息，最多保留5个gc日志文件，然后控制每个gc日志文件的大小是30m
-- -XX:-OmitStackTraceInFastThrow ：示在快速抛出异常时仍然包含堆栈跟踪信息
-- -XX:+AlwaysPreTouch ：用于开启预先触摸（pre-touch）内存。不启用该参数时，分配的内存可能不会立即映射到物理内存，而是在首次访问时才进行。这种行为被称为"懒加载"（lazy allocation）或"按需分配"（allocation on demand）；启用该参数后，JVM会在堆内存初始化时预先触摸所有的页面，确保它们被立即映射到物理内存。这样可以消除后续访问这些内存区域时的延迟，提高应用程序的性能。
-- -XX:MaxDirectMemorySize=15g ：表示直接内存的最大大小被限制为15GB。如果应用程序尝试分配超过这个大小的直接内存，将会抛出OutOfMemoryError异常。直接内存是指通过java.nio.DirectByteBuffer等类直接分配的本机内存，它不位于Java堆内存中。直接内存通常用于高性能的I/O操作，如网络通信和文件读写。
-- -XX:-UseLargePages -XX:-UseBiasedLocking ：表示禁用大对象和偏向锁
+>- -server ：采用服务器模式
+>- -Xms8g -Xmx8g -Xmn4g ：堆内存初始大小为8G，最大大小为8G，年轻代大小为4G
+>- -XX:+UseG1GC -XX:G1HeapRegionSize=16m ：采用G1垃圾回收器，每个region大小为16M
+>- -XX:G1ReservePercent=25 ：表示预留堆内存的25%作为空闲分区
+>- -XX:InitiatingHeapOccupancyPercent=30 ：表示当年轻代占用的堆内存达到总堆内存的30%时，就会触发并发标记周期，提高了gc频率，避免垃圾对象过多
+>- -XX:SoftRefLRUPolicyMSPerMB=0 ：表示每个MB堆内存中的软引用对象可以存活0毫秒。避免频繁回收一些软引用的Class对象，这里可以调整为1000
+>- -verbose:gc -Xloggc:/dev/shm/mq_gc_%p.log -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationStoppedTime -XX:+PrintAdaptiveSizePolicy -XX:+UseGCLogFileRotation >-XX:NumberOfGCLogFiles=5 -XX:GCLogFileSize=30m ：这些参数都是控制GC日志打印输出的，指定gc日志文件的地址，要打印哪些详细信息，最多保留5个gc日志文件，然后控制每个gc日志文件的大小是30m
+>- -XX:-OmitStackTraceInFastThrow ：示在快速抛出异常时仍然包含堆栈跟踪信息
+>- -XX:+AlwaysPreTouch ：用于开启预先触摸（pre-touch）内存。不启用该参数时，分配的内存可能不会立即映射到物理内存，而是在首次访问时才进行。这种行为被称为"懒加载"（lazy allocation）或"按需分配"（allocation on demand）；启用该参数后，JVM会在堆内存初始化时预先触摸所有的页面，确保它们被立即映射到物理内存。这样可以消除后续访问这些内存区域时的延迟，提高应用程序的性能。
+>- -XX:MaxDirectMemorySize=15g ：表示直接内存的最大大小被限制为15GB。如果应用程序尝试分配超过这个大小的直接内存，将会抛出OutOfMemoryError异常。直接内存是指通过java.nio.DirectByteBuffer等类直接分配的本机内存，它不位于Java堆内存中。直接内存通常用于高性能的I/O操作，如网络通信和文件读写。
+>- -XX:-UseLargePages -XX:-UseBiasedLocking ：表示禁用大对象和偏向锁
 
 #### 调整RocketMQ核心参数
 修改dledger的配置文件（位置是在rocketmq/distribution/target/apache-rocketmq/conf/dledger）
-- sendMessageThreadPoolNums=16 ：这个参数的意思就是RocketMQ内部用来发送消息的线程池的线程数量，默认是16，可以根据机器的CPU数量修改
+>- sendMessageThreadPoolNums=16 ：这个参数的意思就是RocketMQ内部用来发送消息的线程池的线程数量，默认是16，可以根据机器的CPU数量修改
+
+### RocketMQ集群部署
+![rocketmq_deploy_mindmap](../images/mq/2023-12-20_rocketmq部署.png)
+
+### 订单系统架构
+![order_architecture](../images/mq/2023-12-20_order_architecture.png)

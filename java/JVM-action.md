@@ -16,4 +16,14 @@
 2.使用内存工具分析MAT、jvisualvm等进行分析。以MAT为例：  
 File → Open Heap Dump... 打开dump.dat  
 查看Overview中的Dominator Tree，确认内存占用高的线程对象，右键 → Java Basics → Thread Overview and Stacks，再通过内存占用情况和具体的对象值定位代码  
-![memoryAnalysis](../images/jvm/2023-08-14_memoryAnalysis.png)
+![memoryAnalysis](../images/jvm/2023-08-14_memoryAnalysis.png)  
+3.有内存溢出等问题时也可以查看Problem Suspect，<span style="color: blue;">See stacktrace</span>可以查看打印的执行栈信息，<span style="color: blue;">Details</span>可以查看对象占用内存的信息  
+![Problem Suspect](../images/jvm/2023-12-28_problem_suspect.png ':size=50%')
+
+### 在OOM时自动dump快照
+在JVM启动参数中加入如下参数：  
+> -XX:+HeapDumpOnOutOfMemoryError  
+> -XX:HeapDumpPath=/usr/local/app/oom
+
+### JDK8启动常用参数模板
+> -Xms4096M -Xmx4096M -Xmn3072M -Xss1M  -XX:MetaspaceSize=256M -XX:MaxMetaspaceSize=512M -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:CMSInitiatingOccupancyFaction=92 -XX:+UseCMSCompactAtFullCollection -XX:CMSFullGCsBeforeCompaction=0 -XX:+CMSParallelInitialMarkEnabled -XX:+CMSScavengeBeforeRemark -XX:+DisableExplicitGC -XX:+PrintGCDetails -Xloggc:gc.log -XX:+HeapDumpOnOutOfMemoryError  -XX:HeapDumpPath=/usr/local/app/oom

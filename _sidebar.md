@@ -1,6 +1,6 @@
 * [Spring Cloud Alibaba](springcloudalibaba/initializr.md)
 * [Spring Cloud](springcloud/springAnalysis.md)
-* [Java](java/jdk-features.md)
+* [Java](java/JVM.md)
 * [算法](algorithm/dataStructure.md)
 * [消息队列](messagequeue/rabbitmq.md)
 * [Linux运维](linuxOps/concurrency.md)

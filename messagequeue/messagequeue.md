@@ -43,3 +43,68 @@ STOMP的灵活性体现在它能够运行在多种底层传输协议之上，如
 #### MQTT
 Message Queuing Telemetry Transport，消息队列遥测传输，是IBM 开发的一个即时通信协议。  
 MQTT协议是一种轻量级的、基于发布/订阅（publish/subscribe）模型的物联网（IoT）通信协议。它设计之初是为了在资源受限的设备（如传感器网络和移动设备）之间高效、可靠地传输数据。MQTT协议非常适合于远程位置、低带宽、不稳定网络条件下的设备连接和数据交换。
+
+### AMQP 协议消息运转时序图
+- **生产者发送消息时序图**  
+![AMQP_Producer_sequence](../images/mq/2024-1-26_AMQP生产者发送消息时序图.png)
+
+- **消费者接收消息时序图**  
+![AMQP_Consumer_sequence](../images/mq/2024-1-26_AMQP消费者接收消息时序图.png)
+
+### AMQP主要命令概览
+ 名 称 | 是否包含内容体 | 对应客户端中的方法 | 简要描述 
+ :---- | :----: | :---- | :----
+Connection.Start | 否 | factory.newConnection | 建立连接相关
+Connection.Start-Ok | 否 | 同上 | 同上
+Connection.Tune | 否 | 同上 | 同上
+Connection.Tune-Ok | 否 | 同上 | 同上
+Connection.Open | 否 | 同上 | 同上
+Connection.Open-Ok | 否 | 同上 | 同上
+Connection.Close | 否 | connection.close | 关闭连接
+Connection.Close-Ok | 否 | 同上 | 同上
+Channel.Open | 否 | connection.openChannel | 开启信道
+Channel.Open-Ok | 否 | 同上 | 同上
+Channel.Close | 否 | channel.close | 关闭信道
+Channel.Close-Ok | 否 | 同上 | 同上
+Exchange.Declare | 否 | channel.exchangeDeclare | 声明交换器
+Exchange.Declare-Ok | 否 | 同上 | 同上
+Exchange.Delete | 否 | channel.exchangeDelete | 删除交换器
+Exchange.Delete-Ok | 否 | 同上 | 同上
+Exchange.Bind | 否 | channel.exchangeBind | 交换器与交换器绑定
+Exchange.Bind-Ok | 否 | 同上 | 同上
+Exchange.Unbind | 否 | channel.exchangeUnbind | 交换器与交换器解绑
+Exchange.Unbind-Ok | 否 | 同上 | 同上
+Queue.Declare | 否 | channel.queueDeclare | 声明队列
+Queue.Declare-Ok | 否 | 同上 | 同上
+Queue.Bind | 否 | channel.queueBind | 队列与交换器绑定
+Queue.Bind-Ok | 否 | 同上 | 同上
+Queue.Purge | 否 | channel.queuePurge | 清除队列中的内容
+Queue.Purge-Ok | 否 | 同上 | 同上
+Queue.Delete | 否 | channel.queueDelete | 删除队列
+Queue.Delete-Ok | 否 | 同上 | 同上
+Queue.Unbind | 否 | channel.queueUnbind | 队列与交换器解绑
+Queue.Unbind-Ok | 否 | 同上 | 同上
+Basic.Qos | 否 | channel.basicQos | 设置未被确认消费的个数
+Basic.Qos-Ok | 否 | 同上 | 同上
+Basic.Consume | 否 | channel.basicConsume | 消费消息（推模式）
+Basic.Consume-Ok | 否 | 同上 | 同上
+Basic.Cancel | 否 | channel.basicCancel | 取消
+Basic.Cancel-Ok | 否 | 同上 | 同上
+Basic.Publish | 是 | channel.basicPublish | 发送消息
+Basic.Return | 是 | 无 | 未能成功路由的消息返回
+Basic.Deliver | 是 | 无 | Broker | 推送消息
+Basic.Get | 否 | channel.basicGet | 消费消息（拉模式）
+Basic.Get-Ok | 是 | 同上 | 同上
+Basic.Ack | 否 | channel.basicAck | 确认
+Basic.Reject | 否 | channel.basicReject | 拒绝（单条拒绝）
+Basic.Recover | 否 | channel.basicRecover | 请求Broker 重新发送未被确认的消息
+Basic.Recover-Ok | 否 | 同上 | 同上
+Basic.Nack | 否 | channel.basicNack | 拒绝（可批量拒绝）
+Tx.Select | 否 | channel.txSelect | 开启事务
+Tx.Select-Ok | 否 | 同上 | 同上
+Tx.Commit | 否 | channel.txCommit | 事务提交
+Tx.Commit-Ok | 否 | 同上 | 同上
+Tx.Rollback | 否 | channel.txRollback | 事务回滚
+Tx.Rollback-Ok | 否 | 同上 | 同上
+Confirm Select | 否 | channel.confirmSelect | 开启发送端确认模式
+Confirm.Select-Ok | 否 | 同上 | 同上

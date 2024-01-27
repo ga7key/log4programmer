@@ -103,6 +103,7 @@ Channel 提供了一种在单个TCP连接上执行多路复用的方法，这意
 生产者和消费者都可以声明一个交换器或者队列。  
 如果尝试声明一个已经存在的交换器或者队列，只要声明的参数完全匹配现存的交换器或者队列，RabbitMQ就可以什么都不做，并成功返回。如果声明的参数不匹配则会抛出异常。  
 
+#### 何时创建交换器和队列
 按照RabbitMQ 官方建议，生产者和消费者都应该尝试创建（这里指声明操作）队列。这是一个很好的建议，但不适用于所有的情况。如果业务本身在架构设计之初已经充分地预估了队列的使用情况，完全可以在业务程序上线之前在服务器上创建好（比如通过页面管理、RabbitMQ命令或者更好的是从配置中心下发），这样业务程序也可以免去声明的过程，直接使用即可。预先创建好资源还有一个好处是，可以确保交换器和队列之间正确地绑定匹配。
 
 - ##### exchangeDeclare
@@ -229,6 +230,128 @@ void exchangeBindNoWait(String destination, String source, String routingKey, Ma
 source：源交换器，消息从source 交换器转发到destination 交换器  
 routingKey：用来绑定两个交换器的路由键  
 argument：定义绑定的一些参数  
+
+### 发送消息
+发送一个消息，可以使用Channel 类的basicPublish 方法  
+
+```
+void basicPublish(String exchange, String routingKey, BasicProperties props, byte[] body) throws IOException;
+
+void basicPublish(String exchange, String routingKey, boolean mandatory, BasicProperties props, byte[] body) throws IOException;
+
+void basicPublish(String exchange, String routingKey, boolean mandatory, boolean immediate, BasicProperties props, byte[] body) throws IOException;
+```
+
+> exchange：交换器的名称，指明消息需要发送到哪个交换器中。如果设置为空字符串，则消息会被发送到RabbitMQ 默认的交换器中。  
+routingKey：路由键，交换器根据路由键将消息存储到相应的队列之中。  
+props：消息的基本属性集，其包含14 个属性成员，分别有contentType、contentEncoding、headers(Map<String,Object>)、deliveryMode、priority、correlationId、replyTo、expiration、messageId、timestamp、type、userId、appId、clusterId。  
+byte[] body：消息体（payload），真正需要发送的消息。  
+mandatory：当mandatory 参数设为true 时，交换器无法根据自身的类型和路由键找到一个符合条件的队列，那么RabbitMQ 会调用Basic.Return 命令将消息返回给生产者。当mandatory 参数设置为false 时，出现上述情形，则消息直接被丢弃。  
+immediate：当immediate 参数设为true 时，如果交换器在将消息路由到队列时发现队列上并不存在任何消费者，那么这条消息将不会存入队列中。当与路由键匹配的所有队列都没有消费者时，该消息会通过Basic.Return 返回至生产者。<span style="color: red;">RabbitMQ 3.0 版本开始去掉了对immediate 参数的支持，对此RabbitMQ 官方解释是：immediate 参数会影响镜像队列的性能，增加了代码复杂性，建议采用TTL 和DLX 的方法替代</span>  
+
+##### 当mandatory 为 true 时，添加ReturnListener 监听器
+```
+    channel.basicPublish(EXCHANGE_NAME, "", true, MessageProperties.PERSISTENT_TEXT_PLAIN, "测试消息".getBytes());
+    channel.addReturnListener(new ReturnListener() {
+        public void handleReturn(int replyCode, String replyText, String exchange, String routingKey, 
+                                AMQP.BasicProperties basicProperties, byte[] body) throws IOException {
+            String message = new String(body);
+            System.out.println("Basic.Return 返回的结果是："+message);
+        }
+    });
+```
+
+##### BasicProperties props 示例
+```
+// MessageProperties.PERSISTENT_TEXT_PLAIN 相当于设置投递模式（delivery mode）为2，即消息会被持久化，
+// 设置优先级（priority）为1，设置content-type为“text/plain”
+channel.basicPublish(exchangeName, routingKey, mandatory, MessageProperties.PERSISTENT_TEXT_PLAIN, messageBodyBytes);
+
+// 自己设定同上的属性
+channel.basicPublish(exchangeName, routingKey,
+    new AMQP.BasicProperties.Builder().contentType("text/plain").deliveryMode(2).priority(1).userId("hidden").build(), messageBodyBytes);
+
+// 发送一条带有headers、过期时间（expiration）的消息
+Map<String, Object> headers = new HashMap<String, Object>();
+headers.put("localtion", "here");
+headers.put("time","today");
+channel.basicPublish(exchangeName, routingKey, new AMQP.BasicProperties.Builder().headers(headers).expiration("60000").build(), messageBodyBytes);
+```
+
+### 消费消息
+RabbitMQ 的**消费模式**分两种：推（Push）模式和拉（Pull）模式。推模式采用Basic.Consume 进行消费，而拉模式则是调用Basic.Get 进行消费。
+
+#### 推模式
+接收消息一般通过实现Consumer 接口或者继承DefaultConsumer 类来实现。  
+
+Channel 类中basicConsume 方法有如下几种形式：
+```
+String basicConsume(String queue, Consumer callback) throws IOException;
+
+String basicConsume(String queue, boolean autoAck, Consumer callback) throws IOException;
+
+String basicConsume(String queue, boolean autoAck, Map<String, Object> arguments, Consumer callback) throws IOException;
+
+String basicConsume(String queue, boolean autoAck, String consumerTag, Consumer callback) throws IOException;
+
+String basicConsume(String queue, boolean autoAck, String consumerTag, boolean noLocal, boolean exclusive,
+                    Map<String, Object> arguments, Consumer callback) throws IOException;
+```
+> queue：队列的名称  
+autoAck：设置是否自动确认。建议设成false，即不自动确认  
+consumerTag：消费者标签，用来区分多个消费者  
+noLocal：设置为true 则表示不能将同一个Connection 中生产者发送的消息传送给这个Connection 中的消费者  
+exclusive：设置是否排他
+arguments：设置消费者的其他参数
+callback：设置消费者的回调函数。用来处理RabbitMQ 推送过来的消息，比如DefaultConsumer，使用时需要客户端重写（override）其中的方法
+
+callback 中被重写的方法：
+```
+// 处理推送的消息
+void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException;
+
+// 会在其他方法之前调用，返回消费者标签
+void handleConsumeOk(String consumerTag);
+
+// 消费端可以在显式地取消订阅的时候调用
+void handleCancelOk(String consumerTag);
+
+// 消费端可以在隐式地取消订阅的时候调用
+void handleCancel(String consumerTag) throws IOException;
+
+// 当Channel或者Connection关闭的时候会调用
+void handleShutdownSignal(String consumerTag, ShutdownSignalException sig);
+
+// 请求重新消费未确认的消息时调用
+void handleRecoverOk(String consumerTag);
+```
+
+通过channel.basicCancel 方法可以显式地取消一个消费者的订阅
+```
+// 相当于首先触发handleConsumerOk 方法，之后触发handleDelivery方法，最后触发handleCancelOk 方法
+channel.basicCancel(consumerTag);
+```
+和生产者一样，消费者客户端同样需要考虑线程安全的问题。消费者客户端的这些callback 会被分配到与Channel 不同的线程池上，这意味着消费者客户端可以安全地调用这些阻塞方法，比如channel.queueDeclare、channel.basicCancel 等。  
+每个Channel 都拥有自己独立的线程。最常用的做法是一个Channel 对应一个消费者,也就是意味着消费者彼此之间没有任何关联。当然也可以在一个Channel 中维持多个消费者,但是要注意一个问题，如果Channel 中的一个消费者一直在运行，那么其他消费者的callback 会被“耽搁”。
+
+#### 拉模式
+通过channel.basicGet 方法可以单条地获取消息，其返回值是GetRespone  
+
+```
+GetResponse basicGet(String queue, boolean autoAck) throws IOException;
+```
+> queue：队列的名称  
+autoAck：设置是否自动确认。建议设成false，即不自动确认  
+
+<span style="color: red;font-weight: bold;">Tips</span>：Basic.Consume 将信道（Channel）置为接收模式，直到取消队列的订阅为止。在接收模式期间，RabbitMQ 会不断地推送消息给消费者，当然推送消息的个数还是会受到Basic.Qos 的限制。如果只想从队列获得单条消息而不是持续订阅，建议还是使用Basic.Get 进行消费。但是不能将Basic.Get 放在一个循环里来代替Basic.Consume，这样做会严重影响RabbitMQ的性能。如果要实现高吞吐量，消费者理应使用Basic.Consume 方法。  
+
+#### 消费端的确认与拒绝
+
+
+
+
+
+
 
 
 ### 用RabbitTemplate时保证消息可靠性

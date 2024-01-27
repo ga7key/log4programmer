@@ -52,7 +52,7 @@ MQTT协议是一种轻量级的、基于发布/订阅（publish/subscribe）模�
 ![AMQP_Consumer_sequence](../images/mq/2024-1-26_AMQP消费者接收消息时序图.png)
 
 ### AMQP主要命令概览
- 名 称 | 是否包含内容体 | 对应客户端中的方法 | 简要描述 
+ 名 称 | 是否包含内容体 | RabbitMQ客户端中对应的方法 | 简要描述 
  :---- | :----: | :---- | :----
 Connection.Start | 否 | factory.newConnection | 建立连接相关
 Connection.Start-Ok | 否 | 同上 | 同上

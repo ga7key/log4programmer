@@ -299,7 +299,7 @@ byte[] body：消息体（payload），真正需要发送的消息。
 mandatory：当mandatory 参数设为true 时，交换器无法根据自身的类型和路由键找到一个符合条件的队列，那么RabbitMQ 会调用Basic.Return 命令将消息返回给生产者。当mandatory 参数设置为false 时，出现上述情形，则消息直接被丢弃。  
 immediate：当immediate 参数设为true 时，如果交换器在将消息路由到队列时发现队列上并不存在任何消费者，那么这条消息将不会存入队列中。当与路由键匹配的所有队列都没有消费者时，该消息会通过Basic.Return 返回至生产者。<span style="color: red;">RabbitMQ 3.0 版本开始去掉了对immediate 参数的支持，对此RabbitMQ 官方解释是：immediate 参数会影响镜像队列的性能，增加了代码复杂性，建议采用TTL 和DLX 的方法替代</span>  
 
-##### 当mandatory 为 true 时，添加ReturnListener 监听器
+##### 当mandatory 为 true 时，添加ReturnListener 监听器来接收返回的消息
 ```
     channel.basicPublish(EXCHANGE_NAME, "", true, MessageProperties.PERSISTENT_TEXT_PLAIN, "测试消息".getBytes());
     channel.addReturnListener(new ReturnListener() {
@@ -439,6 +439,173 @@ channel.basicRecover();
 // 如果requeue 参数设置为false，那么同一条消息会被路由到死信队列（如果配置过），再分配给与之前相同的消费者
 channel.basicRecover(boolean requeue);
 ```
+
+### 备份交换器
+Alternate Exchange，简称AE  
+生产者在发送消息时如果不设置mandatory 参数，那么消息在未被路由的情况下将会丢失；如果设置了mandatory 参数，那么需要添加ReturnListener 的编程逻辑，生产者的代码将变得复杂。  
+如果既不想复杂化生产者的编程逻辑，又不想消息丢失，那么可以使用备份交换器，这样可以将未被路由的消息存储在RabbitMQ 中，再在需要的时候去处理这些消息。
+
+<span style="color: red;font-weight: bold;">Tips：</span>
+> 如果设置的备份交换器不存在，客户端和RabbitMQ 服务端都不会有异常出现，此时消息会丢失。  
+如果备份交换器没有绑定任何队列，客户端和RabbitMQ 服务端都不会有异常出现，此时消息会丢失。  
+如果备份交换器没有任何匹配的队列，客户端和RabbitMQ 服务端都不会有异常出现，此时消息会丢失。  
+如果备份交换器和mandatory 参数一起使用，那么mandatory 参数无效。  
+
+```
+// 一、通过在声明交换器（ 调用channel.exchangeDeclare 方法）的时候添加alternate-exchange
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("alternate-exchange", "myAe");
+channel.exchangeDeclare("normalExchange", "direct", true, false, args);
+channel.exchangeDeclare("myAe", "fanout", true, false, null);
+channel.queueDeclare("normalQueue", true, false, false, null);
+channel.queueBind("normalQueue", "normalExchange", "normalKey");
+channel.queueDeclare("unroutedQueue", true, false, false, null);
+channel.queueBind("unroutedQueue", "myAe", "");
+```
+> 上面的代码中声明了两个交换器normalExchange 和myAe，分别绑定了normalQueue 和unroutedQueue 这两个队列，同时将myAe 设置为normalExchange 的备份交换器。  
+注意myAe 的交换器类型为fanout（建议设置为fanout 类型，其它类型要进行路由键匹配，否则消息丢失）  
+如果此时发送一条消息到normalExchange 上，当路由键等于“normalKey”的时候，消息能正确路由到normalQueue 这个队列中。  、
+如果路由键设为其他值，比如“errorKey”，即消息不能被正确地路由到与normalExchange 绑定的任何队列上，此时就会发送给myAe，进而发送到unroutedQueue 这个队列。
+
+```
+// 二、采用策略（Policy）方式来设置备份交换器
+rabbitmqctl set_policy AE "^normalExchange$" ‘{"alternate-exchange": "myAE"}’
+```
+
+<span style="color: red;font-weight: bold;">Tips：</span>调用channel.exchangeDeclar 声明备份交换器的优先级更高，会覆盖掉Policy 的设置。
+
+
+### 过期时间（TTL）
+Time to Live 的简称，RabbitMQ 可以对消息和队列设置TTL。  
+
+#### 设置消息的TTL
+1. 通过队列属性设置，队列中所有消息都有相同的过期时间
+2. 对消息本身进行单独设置，每条消息的TTL 不同
+
+如果两种方法一起使用，则消息的TTL 以两者之间较小的那个数值为准。  
+
+消息在队列中的生存时间一旦超过设置的TTL 值时，就会变成“死信”（Dead Message），消费者将无法再收到该消息（这点不是绝对的）。  
+
+如果不设置TTL，则表示此消息不会过期。  
+
+如果将TTL 设置为0，则表示除非此时可以直接将消息投递到消费者，否则该消息会被立即丢弃。  
+
+“通过队列属性设置”队列TTL 属性的方法，一旦消息过期，就会从队列中抹去，而在“对消息本身进行单独设置”的情况，即使消息过期，也不会马上从队列中抹去，因为每条消息是否过期是在即将投递到消费者之前判定的。
+
+1. 通过队列属性设置消息TTL 的代码：
+
+```
+// 1.在channel.queueDeclare 方法中加入x-message-ttl 参数实现的，这个参数的单位是毫秒
+Map<String, Object> argss = new HashMap<String, Object>();
+argss.put("x-message-ttl",6000);
+channel.queueDeclare(queueName, durable, exclusive, autoDelete, argss);
+
+// 2.通过Policy 的方式来设置
+rabbitmqctl set_policy TTL ".*" '{"message-ttl":60000}' --apply-to queues
+
+// 3.通过调用HTTP API 接口设置
+$ curl -i -u root:root -H "content-type:application/json"-X PUT -d
+'{"auto_delete":false,"durable":true,"arguments":{"x-message-ttl":60000}}'
+http://localhost:15672/api/queues/{vhost}/{queuename}
+
+```
+
+2. 对消息本身进行单独设置TTL 的代码：
+
+```
+// 1.通过BasicProperties.Builder 设置
+AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
+builder.deliveryMode(2);//持久化消息
+builder.expiration("60000");//设置TTL=60000ms
+AMQP.BasicProperties properties = builder.build();
+channel.basicPublish(exchangeName,routingKey,mandatory,properties,"ttlTestMessage".getBytes());
+
+// 2.通过BasicProperties 设置
+AMQP.BasicProperties properties = new AMQP.BasicProperties();
+Properties.setDeliveryMode(2);
+properties.setExpiration("60000");
+channel.basicPublish(exchangeName,routingKey,mandatory,properties,"ttlTestMessage".getBytes());
+
+// 3.通过HTTP API 接口设置
+$ curl -i -u root:root -H "content-type:application/json" -X POST -d
+'{"properties":{"expiration":"60000"},"routing_key":"routingkey","payload":"ttlTestMessage","payload_encoding":"string"}'
+http://localhost:15672/api/exchanges/{vhost}/{exchangename}/publish
+```
+
+#### 设置队列的TTL
+
+通过channel.queueDeclare 方法中的x-expires 参数可以控制队列被自动删除前处于未使用状态的时间。  
+未使用的意思是队列上没有任何的消费者，队列也没有被重新声明，并且在过期时间段内也未调用过Basic.Get 命令。
+
+设置队列里的TTL 可以应用于类似RPC 方式的回复队列，在RPC 中，许多队列会被创建出来，但是却是未被使用的。  
+RabbitMQ 会确保在过期时间到达后将队列删除，但是不保障删除的动作有多及时。
+
+在RabbitMQ 重启后，持久化的队列的过期时间会被重新计算。
+
+```
+// 用于表示过期时间的x-expires 参数以毫秒为单位，并且服从和x-message-ttl 一样的约束条件，不过不能设置为0
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("x-expires", 1800000);
+channel.queueDeclare("myqueue", false, false, false, args);
+```
+
+### 死信队列
+DLX，全称为Dead-Letter-Exchange，可以称之为死信交换器。  
+当消息在一个队列中变成死信（dead message）之后，它能被重新被发送到另一个交换器中，这个交换器就是DLX，绑定DLX 的队列就称之为死信队列。
+
+消息变成死信的原因：
+> 消息被拒绝（Basic.Reject/Basic.Nack），并且设置requeue 参数为false；  
+  消息过期；  
+  队列达到最大长度。  
+
+为某个队列设置DLX （实际上就是设置某个队列的属性），当这个队列中存在死信时，RabbitMQ 就会自动地将这个消息重新发布到设置的DLX 上去，进而被路由到DLX 的死信队列。
+
+```
+// 在channel.queueDeclare 方法中设置x-dead-letter-exchange 参数来为这个队列添加DLX
+channel.exchangeDeclare("dlx_exchange", "direct");//创建DLX: dlx_exchange
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("x-dead-letter-exchange", " dlx_exchange ");
+//为队列myqueue 添加DLX
+channel.queueDeclare("myqueue", false, false, false, args);
+
+// 也可以为这个DLX 指定路由键，如果没有特殊指定，则使用原队列的路由键
+args.put("x-dead-letter-routing-key", "dlx-routing-key");
+
+// 通过Policy 的方式添加DLX
+rabbitmqctl set_policy DLX ".*" '{"dead-letter-exchange":" dlx_exchange "}' --apply-to queues
+```
+
+代码示例：
+```
+channel.exchangeDeclare("exchange.dlx", "direct", true);
+channel.exchangeDeclare("exchange.normal", "fanout", true);
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("x-message-ttl", 10000);
+args.put("x-dead-letter-exchange", "exchange.dlx");
+args.put("x-dead-letter-routing-key", "routingkey");
+channel.queueDeclare("queue.normal", true, false, false, args);
+channel.queueBind("queue.normal", "exchange.normal", "");
+channel.queueDeclare("queue.dlx", true, false, false, null);
+channel.queueBind("queue.dlx", "exchange.dlx", "routingkey");
+channel.basicPublish("exchange.normal", "rk", MessageProperties.PERSISTENT_TEXT_PLAIN, "dlx".getBytes());
+```
+> 这段代码创建了两个交换器exchange.normal 和exchange.dlx，分别绑定两个队列queue.normal 和queue.dlx，再将exchange.dlx 设置到queue.normal  
+生产者首先发送一条携带路由键为“rk”的消息，然后经过交换器exchange.normal 顺利地存储到队列queue.normal 中。由于队列queue.normal 设置了过期时间为10s，在这10s 内没有消费者消费这条消息，那么判定这条消息为过期。由于设置了DLX，过期之时，消息被丢给交换器exchange.dlx 中，这时找到与exchange.dlx 匹配的队列queue.dlx，最后消息被存储在queue.dlx 这个死信队列中。
+
+
+### 延迟队列
+延迟队列存储的对象是对应的延迟消息，所谓“延迟消息”是指当消息被发送以后，并不想让消费者立刻拿到消息，而是等待特定时间后，消费者才能拿到这个消息进行消费。
+
+延迟队列的使用场景：
+> 超时未支付的订单，需要关闭  
+智能设备定时开关
+
+在AMQP 协议中，或者RabbitMQ 本身没有直接支持延迟队列的功能，但是可以通过DLX 和TTL 模拟出延迟队列的功能。
+
+死信队列可以被视为延迟队列，假设一个应用中将每条消息都设置为10 秒的延迟，生产者通过交换器将发送的消息存储到队列中。消费者订阅的并非是这个队列，而是给这个队列配置的死信队列。当消息这个队列中过期之后被存入死信队列中，消费者就恰巧消费到了延迟10 秒的这条消息。
+
+![延迟队列](../images/mq/2024-1-29_RabbitMQ延迟队列.png ':size=50%')  
+> 根据应用需求的不同，生产者在发送消息的时候通过设置不同的路由键，以此将消息发送到与交换器绑定的不同的队列中。这里队列分别设置了过期时间为5 秒、10 秒、30 秒、1 分钟，同时也分别配置了DLX 和相应的死信队列。当相应的消息过期时，就会转存到相应的死信队列（即延迟队列）中，这样消费者根据业务自身的情况，分别选择不同延迟等级的延迟队列进行消费。
 
 
 ### 用RabbitTemplate时保证消息可靠性

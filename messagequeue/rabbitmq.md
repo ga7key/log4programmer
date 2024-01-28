@@ -88,7 +88,7 @@ BindingKey 并不是在所有的情况下都生效，它依赖于交换器类型
 （6）关闭信道  
 （7）关闭连接  
 
-### RabbitMQ连接
+### 连接RabbitMQ
 
 #### Connection
 Connection 是指客户端与RabbitMQ服务器之间建立的TCP连接。它是一个底层的网络连接，用于承载AMQP的消息交换。  
@@ -231,6 +231,56 @@ source：源交换器，消息从source 交换器转发到destination 交换器
 routingKey：用来绑定两个交换器的路由键  
 argument：定义绑定的一些参数  
 
+#### 关闭连接
+```
+// 显式地关闭Channel 是个好习惯，但这不是必须的，在Connection 关闭的时候，Channel 也会自动关闭
+channel.close();
+connection.close();
+```
+
+Connection 和Channel 的生命周期：
+> Open：开启状态，代表当前对象可以使用。  
+Closing：正在关闭状态。当前对象被显式地通知调用关闭方法（shutdown），这样就产生了一个关闭请求让其内部对象进行相应的操作，并等待这些关闭操作的完成。  
+Closed：已经关闭状态。当前对象已经接收到所有的内部对象已完成关闭动作的通知，并且其也关闭了自身。
+
+在Connection 和Channel 中与关闭相关的方法：
+```
+// 当Connection 或者Channel 的状态转变为Closed 的时候会调用ShutdownListener。
+// 如果将一个ShutdownListener 注册到一个已经处于Closed状态的对象（这里特指Connection 和Channel 对象）时，会立刻调用ShutdownListener
+addShutdownListener(ShutdownListener listener)  
+removeShutdownListener (ShutdownListner listener)
+
+// 获取对象关闭的原因（ShutdownSignalException）
+getCloseReason
+
+// 检测对象当前是否处于开启状态
+isOpen
+
+// 显式地通知当前对象执行关闭操作
+close(int closeCode, String closeMessage)
+```
+
+当触发ShutdownListener 的时候，可以获取到关闭的原因（ShutdownSignalException）
+```
+connection.addShutdownListener(new ShutdownListener() {
+    public void shutdownCompleted(ShutdownSignalException cause) {
+        // isHardError 方法可以知道是Connection 的还是Channel 的错误
+        if (cause.isHardError()) {
+            Connection conn = (Connection)cause.getReference();
+            if (!cause.isInitiatedByApplication()) {
+                // getReason 方法可以获取异常相关的信息
+                Method reason = cause.getReason();
+                ...
+            }
+        ...
+        } else {
+            Channel ch = (Channel)cause.getReference();
+            ...
+        }
+    }
+});
+```
+
 ### 发送消息
 发送一个消息，可以使用Channel 类的basicPublish 方法  
 
@@ -345,13 +395,50 @@ autoAck：设置是否自动确认。建议设成false，即不自动确认
 
 <span style="color: red;font-weight: bold;">Tips</span>：Basic.Consume 将信道（Channel）置为接收模式，直到取消队列的订阅为止。在接收模式期间，RabbitMQ 会不断地推送消息给消费者，当然推送消息的个数还是会受到Basic.Qos 的限制。如果只想从队列获得单条消息而不是持续订阅，建议还是使用Basic.Get 进行消费。但是不能将Basic.Get 放在一个循环里来代替Basic.Consume，这样做会严重影响RabbitMQ的性能。如果要实现高吞吐量，消费者理应使用Basic.Consume 方法。  
 
-#### 消费端的确认与拒绝
+#### 确认消息
+为了保证消息从队列可靠地达到消费者，RabbitMQ 提供了消息确认机制（message acknowledgement）。  
+消费者在订阅队列时，可以指定autoAck 参数，当autoAck 等于false 时，RabbitMQ 会等待消费者显式地回复确认信号后才从内存（或者磁盘）中移去消息（实质上是先打上删除标记，之后再删除）。当autoAck 等于true 时，RabbitMQ 会自动把发送出去的消息置为确认，然后从内存（或者磁盘）中删除，而不管消费者是否真正地消费到了这些消息。  
+采用消息确认机制后，只要设置autoAck 参数为false，消费者就有足够的时间处理消息（任务），不用担心处理消息过程中消费者进程挂掉后消息丢失的问题，因为RabbitMQ 会一直等待持有消息直到消费者显式调用Basic.Ack 命令为止。  
+当autoAck 参数置为false，对于RabbitMQ 服务端而言，队列中的消息分成了两个部分：一部分是等待投递给消费者的消息；一部分是已经投递给消费者，但是还没有收到消费者确认信号的消息。如果RabbitMQ 一直没有收到消费者的确认信号，并且消费此消息的消费者已经断开连接，则RabbitMQ 会安排该消息重新进入队列，等待投递给下一个消费者，当然也有可能还是原来的那个消费者。  
+RabbitMQ 不会为未确认的消息设置过期时间，它判断此消息是否需要重新投递给消费者的唯一依据是消费该消息的消费者连接是否已经断开，这么设计的原因是RabbitMQ 允许消费者消费一条消息的时间可以很久很久。
 
+RabbtiMQ 的Web 管理平台上可以看到当前队列中的“Ready”状态和“Unacknowledged”状态的消息数，也可以通过命令查看：
+```
+[root@gackey-pc ~]# rabbitmqctl list_queues name messages_ready messages_unacknowledged
+```
 
+消费者通过调用 channel.basicAck 方法，能够确认特定的消息
+```
+void basicAck(long deliveryTag, boolean multiple);
+```
+> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。它是一个64 位的长整型值，最大值是9223372036854775807  
+multiple（可选）：如果设置为 true，则表示确认deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只确认编号为deliveryTag 的这一条消息。
 
+#### 拒绝消息
+ 
+```
+// 采用channel.basicReject 方法来拒绝这个消息，一次只能拒绝一条消息 
+void basicReject(long deliveryTag, boolean requeue) throws IOException;
 
+// 如果想要批量拒绝消息，可以调用channel.basicNack 方法来实现
+void basicNack(long deliveryTag, boolean multiple, boolean requeue) throws IOException;
+```
+> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。  
+requeue：如果设置为true，则RabbitMQ 会重新将这条消息存入队列，以便可以发送给下一个订阅的消费者；如果设置为false，则RabbitMQ立即会把消息从队列中移除，而不会把它发送给新的消费者。  
+multiple：如果设置为 true，则表示拒绝deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只拒绝编号为deliveryTag 的这一条消息。
 
+<span style="color: red;font-weight: bold;">Tips</span>：将channel.basicReject 或者channel.basicNack 中的requeue 设置为false，可以启用“死信队列”的功能。死信队列可以通过检测被拒绝或者未送达的消息来追踪问题。  
 
+#### 手动恢复消息
+通常用channel.basicRecover 在消费者崩溃后恢复未处理的消息
+```
+// 将所有未确认的消息重新加入到原始队列，再次投递给消费者
+channel.basicRecover();
+
+// requeue 参数默认设置为true，则未被确认的消息会被重新加入到队列中，这样对于同一条消息来说，可能会被分配给与之前不同的消费者
+// 如果requeue 参数设置为false，那么同一条消息会被路由到死信队列（如果配置过），再分配给与之前相同的消费者
+channel.basicRecover(boolean requeue);
+```
 
 
 ### 用RabbitTemplate时保证消息可靠性

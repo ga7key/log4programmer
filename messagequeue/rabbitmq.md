@@ -395,51 +395,6 @@ autoAck：设置是否自动确认。建议设成false，即不自动确认
 
 <span style="color: red;font-weight: bold;">Tips</span>：Basic.Consume 将信道（Channel）置为接收模式，直到取消队列的订阅为止。在接收模式期间，RabbitMQ 会不断地推送消息给消费者，当然推送消息的个数还是会受到Basic.Qos 的限制。如果只想从队列获得单条消息而不是持续订阅，建议还是使用Basic.Get 进行消费。但是不能将Basic.Get 放在一个循环里来代替Basic.Consume，这样做会严重影响RabbitMQ的性能。如果要实现高吞吐量，消费者理应使用Basic.Consume 方法。  
 
-#### 确认消息
-为了保证消息从队列可靠地达到消费者，RabbitMQ 提供了消息确认机制（message acknowledgement）。  
-消费者在订阅队列时，可以指定autoAck 参数，当autoAck 等于false 时，RabbitMQ 会等待消费者显式地回复确认信号后才从内存（或者磁盘）中移去消息（实质上是先打上删除标记，之后再删除）。当autoAck 等于true 时，RabbitMQ 会自动把发送出去的消息置为确认，然后从内存（或者磁盘）中删除，而不管消费者是否真正地消费到了这些消息。  
-采用消息确认机制后，只要设置autoAck 参数为false，消费者就有足够的时间处理消息（任务），不用担心处理消息过程中消费者进程挂掉后消息丢失的问题，因为RabbitMQ 会一直等待持有消息直到消费者显式调用Basic.Ack 命令为止。  
-当autoAck 参数置为false，对于RabbitMQ 服务端而言，队列中的消息分成了两个部分：一部分是等待投递给消费者的消息；一部分是已经投递给消费者，但是还没有收到消费者确认信号的消息。如果RabbitMQ 一直没有收到消费者的确认信号，并且消费此消息的消费者已经断开连接，则RabbitMQ 会安排该消息重新进入队列，等待投递给下一个消费者，当然也有可能还是原来的那个消费者。  
-RabbitMQ 不会为未确认的消息设置过期时间，它判断此消息是否需要重新投递给消费者的唯一依据是消费该消息的消费者连接是否已经断开，这么设计的原因是RabbitMQ 允许消费者消费一条消息的时间可以很久很久。
-
-RabbtiMQ 的Web 管理平台上可以看到当前队列中的“Ready”状态和“Unacknowledged”状态的消息数，也可以通过命令查看：
-```
-[root@gackey-pc ~]# rabbitmqctl list_queues name messages_ready messages_unacknowledged
-```
-
-消费者通过调用 channel.basicAck 方法，能够确认特定的消息
-```
-void basicAck(long deliveryTag, boolean multiple);
-```
-> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。它是一个64 位的长整型值，最大值是9223372036854775807  
-multiple（可选）：如果设置为 true，则表示确认deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只确认编号为deliveryTag 的这一条消息。
-
-#### 拒绝消息
- 
-```
-// 采用channel.basicReject 方法来拒绝这个消息，一次只能拒绝一条消息 
-void basicReject(long deliveryTag, boolean requeue) throws IOException;
-
-// 如果想要批量拒绝消息，可以调用channel.basicNack 方法来实现
-void basicNack(long deliveryTag, boolean multiple, boolean requeue) throws IOException;
-```
-> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。  
-requeue：如果设置为true，则RabbitMQ 会重新将这条消息存入队列，以便可以发送给下一个订阅的消费者；如果设置为false，则RabbitMQ立即会把消息从队列中移除，而不会把它发送给新的消费者。  
-multiple：如果设置为 true，则表示拒绝deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只拒绝编号为deliveryTag 的这一条消息。
-
-<span style="color: red;font-weight: bold;">Tips</span>：将channel.basicReject 或者channel.basicNack 中的requeue 设置为false，可以启用“死信队列”的功能。死信队列可以通过检测被拒绝或者未送达的消息来追踪问题。  
-
-#### 手动恢复消息
-通常用channel.basicRecover 在消费者崩溃后恢复未处理的消息
-```
-// 将所有未确认的消息重新加入到原始队列，再次投递给消费者
-channel.basicRecover();
-
-// requeue 参数默认设置为true，则未被确认的消息会被重新加入到队列中，这样对于同一条消息来说，可能会被分配给与之前不同的消费者
-// 如果requeue 参数设置为false，那么同一条消息会被路由到死信队列（如果配置过），再分配给与之前相同的消费者
-channel.basicRecover(boolean requeue);
-```
-
 ### 备份交换器
 Alternate Exchange，简称AE  
 生产者在发送消息时如果不设置mandatory 参数，那么消息在未被路由的情况下将会丢失；如果设置了mandatory 参数，那么需要添加ReturnListener 的编程逻辑，生产者的代码将变得复杂。  
@@ -608,9 +563,221 @@ channel.basicPublish("exchange.normal", "rk", MessageProperties.PERSISTENT_TEXT_
 > 根据应用需求的不同，生产者在发送消息的时候通过设置不同的路由键，以此将消息发送到与交换器绑定的不同的队列中。这里队列分别设置了过期时间为5 秒、10 秒、30 秒、1 分钟，同时也分别配置了DLX 和相应的死信队列。当相应的消息过期时，就会转存到相应的死信队列（即延迟队列）中，这样消费者根据业务自身的情况，分别选择不同延迟等级的延迟队列进行消费。
 
 
-### 用RabbitTemplate时保证消息可靠性
+### 优先级队列
+具有高优先级的队列具有高的优先权，优先级高的消息具备优先被消费的特权。
 
-**一.确保消息发送到 RabbitMQ 的 Exchange**
+```
+// 1.配置一个队列的最大优先级可以通过设置队列的x-max-priority 参数来实现
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("x-max-priority", 10);
+channel.queueDeclare("queue.priority", true, false, false, args);
+
+// 2.发送时在消息中设置消息当前的优先级
+AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
+builder.priority(5);
+AMQP.BasicProperties properties = builder.build();
+channel.basicPublish("exchange_priority","rk_priority",properties,("messages").getBytes());
+```
+上面的代码中设置消息的优先级为5。默认最低为0，最高为队列设置的最大优先级。  
+
+如果在消费者的消费速度大于生产者的速度且Broker 中没有消息堆积的情况下，对发送的消息设置优先级也就没有什么实际意义。
+
+### RPC实现
+Remote Procedure Call 的简称，即远程过程调用。  
+客户端发送请求消息，服务端回复响应的消息。为了接收响应的消息，我们需要在请求消息中发送一个回调队列（可以使用默认的队列）。
+
+![rpc_process](../images/mq/2024-1-29_RPC流程.png)
+
+上图的处理流程：
+> 1. 当客户端启动时，创建一个匿名的回调队列（名称由RabbitMQ 自动创建，图中的回调队列为amq.gen-LhQz1gv3GhDOv8PIDabOXA）
+2. 客户端为RPC 请求设置2 个属性：replyTo 用来告知RPC 服务端回复请求时的目的队列，即回调队列；correlationId 用来标记一个请求。
+3. 请求被发送到rpc_queue 队列中。
+4. RPC 服务端监听rpc_queue 队列中的请求，当请求到来时，服务端会处理并且把带有结果的消息发送给客户端。接收的队列就是replyTo 设定的回调队列。
+5. 客户端监听回调队列，当有消息时，检查correlationId 属性，如果与请求匹配，那就是结果了。
+
+发送消息时，参数BasicProperties 类中包含14 个属性，这里用到两个：  
+1. replyTo：通常用来设置一个回调队列。
+2. correlationId：用来关联请求（request）和其调用RPC 之后的回复（response）。
+
+为每个RPC请求单独创建一个回调队列。效率会非常低。解决方案是可以为每个客户端创建一个单一的回调队列。  
+对于回调队列而言，在其接收到一条回复的消息之后，它并不知道这条消息应该和哪一个请求匹配。这里就用到correlationId 这个属性了，我们应该为每一个请求设置一个唯一的correlationId。之后在回调队列接收到回复的消息时，可以根据这个属性匹配到相应的请求。如果回调队列接收到一条未知correlationId 的回复消息，可以简单地将其丢弃。
+
+RabbitMQ 官方用一个例子来做说明，RPC 客户端通过RPC 调用服务端的方法以便得到相应的斐波那契值：
+```
+// 服务端关键代码
+public class RPCServer {
+    private static final String RPC_QUEUE_NAME = "rpc_queue";
+
+    public static void main(String args[]) throws Exception {
+        //省略了创建Connection 和Channel 的过程
+        channel.queueDeclare(RPC_QUEUE_NAME, false, false, false, null);
+        channel.basicQos(1);
+        System.out.println(" [x] Awaiting RPC requests");
+        Consumer consumer = new DefaultConsumer(channel) {
+            @Override
+            public void handleDelivery(String consumerTag, Envelope envelope, 
+            AMQP.BasicProperties properties, byte[] body) throws IOException {
+                // 将客户端发送的correlationId 装载到回复的消息中
+                AMQP.BasicProperties replyProps = new AMQP.BasicProperties.Builder()
+                .correlationId(properties.getCorrelationId()).build();
+                String response = "";
+                try {
+                    String message = new String(body, "UTF-8");
+                    int n = Integer.parseInt(message);
+                    System.out.println(" [.] fib(" + message + ")");
+                    response += fib(n);
+                } catch (RuntimeException e) {
+                    System.out.println(" [.] " + e.toString());
+                } finally {
+                    channel.basicPublish("", properties.getReplyTo(),
+                    replyProps, response.getBytes("UTF-8"));
+                    channel.basicAck(envelope.getDeliveryTag(), false);
+                }
+            }
+        };
+        channel.basicConsume(RPC_QUEUE_NAME, false, consumer);
+    }
+
+    private static int fib(int n){
+        if (n == 0) return 0;
+        if (n == 1) return 1;
+        return fib(n - 1) + fib(n - 2);
+    }
+}
+
+// 客户端关键代码
+public class RPCClient {
+    private Connection connection;
+    private Channel channel;
+    private String requestQueueName = "rpc_queue";
+    private String replyQueueName;
+    private QueueingConsumer consumer;
+
+    public RPCClient() throws IOException, TimeoutException {
+        //省略了创建Connection 和Channel 的过程
+        replyQueueName = channel.queueDeclare().getQueue();
+        consumer = new QueueingConsumer(channel);
+        channel.basicConsume(replyQueueName, true, consumer);
+    }
+
+    public String call(String message) throws IOException,ShutdownSignalException,ConsumerCancelledException,InterruptedException {
+        String response = null;
+        String corrId = UUID.randomUUID().toString();
+        BasicProperties props = new BasicProperties.Builder()
+        .correlationId(corrId).replyTo(replyQueueName).build();
+        channel.basicPublish("", requestQueueName, props, message.getBytes());
+        while(true){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            if(delivery.getProperties().getCorrelationId().equals(corrId)){
+                response = new String(delivery.getBody());
+                break;
+            }
+        }
+        return response;
+    }
+
+    public void close() throws Exception{
+        connection.close();
+    }
+
+    public static void main(String args[]) throws Exception{
+        RPCClient fibRpc = new RPCClient();
+        System.out.println(" [x] Requesting fib(30)");
+        String response = fibRpc.call("30");
+        System.out.println(" [.] Got '"+response+"'");
+        fibRpc.close();
+    }
+}
+```
+
+### 消息可靠性
+保障消息可靠性的方法：  
+1. 设置mandatory 参数或者备份交换器；
+2. 设置publisher confirm 机制或者事务机制；
+3. 设置交换器、队列和消息都为持久化；
+4. 设置消费端对应的autoAck 参数为false 并在消费完消息之后再进行消息确认。
+
+#### 持久化
+持久化可以提高RabbitMQ 的可靠性，以防在异常情况（重启、关闭、宕机等）下的数据丢失。  
+RabbitMQ 的持久化分为三个部分：  
+1. 交换器的持久化  
+    在声明交换器时将durable 参数置为true，如果交换器不设置持久化，那么出现异常状况后，相关的交换器元数据会丢失，不过消息不会丢失，只是不能将消息发送到这个交换器了。
+2. 队列的持久化  
+    在声明队列时将durable 参数置为true，。如果队列不设置持久化，那么出现异常状况后，相关队列的元数据会丢失，此时数据也会丢失。
+3. 消息的持久化  
+    将消息的投递模式（BasicProperties 中的deliveryMode 属性）设置为2 即可实现消息的持久化。常用的MessageProperties.PERSISTENT_TEXT_PLAIN 实际上是封装了这个属性。
+
+<span style="color: red;font-weight: bold;">Tips</span>：可以将所有的消息都设置为持久化，但是这样会严重影响RabbitMQ 的性能（随机）。写入磁盘的速度比写入内存的速度慢得不只一点点。对于可靠性不高的消息可以不采用持久化处理以提高整体的吞吐量。在选择是否要将消息持久化时，需要在可靠性和吐吞量之间做一个权衡。
+
+持久化不能完全保障消息不丢失，RabbitMQ 并不会为每条消息都进行同步存盘（调用Linux内核的fsync方法）的处理，而是先存放到本地的一块缓存，等到缓存写满或内核需要重用该缓存时，再将该缓存排入输出队列，进而同步到磁盘上（这种策略可以减少磁盘IO）。此时可以引入RabbitMQ 的镜像队列机制来提升可靠性，如果主节点（master）在此特殊时间内挂掉，可以自动切换到从节点（slave），这样有效地保证了高可用性。除非整个集群都挂掉才会导致消息丢失。
+
+#### 消费者确认与拒绝
+##### 确认消息
+为了保证消息从队列可靠地达到消费者，RabbitMQ 提供了消息确认机制（message acknowledgement）。  
+消费者在订阅队列时，可以指定autoAck 参数，当autoAck 等于false 时，RabbitMQ 会等待消费者显式地回复确认信号后才从内存（或者磁盘）中移去消息（实质上是先打上删除标记，之后再删除）。当autoAck 等于true 时，RabbitMQ 会自动把发送出去的消息置为确认，然后从内存（或者磁盘）中删除，而不管消费者是否真正地消费到了这些消息。  
+采用消息确认机制后，只要设置autoAck 参数为false，消费者就有足够的时间处理消息（任务），不用担心处理消息过程中消费者进程挂掉后消息丢失的问题，因为RabbitMQ 会一直等待持有消息直到消费者显式调用Basic.Ack 命令为止。  
+当autoAck 参数置为false，对于RabbitMQ 服务端而言，队列中的消息分成了两个部分：一部分是等待投递给消费者的消息；一部分是已经投递给消费者，但是还没有收到消费者确认信号的消息。如果RabbitMQ 一直没有收到消费者的确认信号，并且消费此消息的消费者已经断开连接，则RabbitMQ 会安排该消息重新进入队列，等待投递给下一个消费者，当然也有可能还是原来的那个消费者。  
+RabbitMQ 不会为未确认的消息设置过期时间，它判断此消息是否需要重新投递给消费者的唯一依据是消费该消息的消费者连接是否已经断开，这么设计的原因是RabbitMQ 允许消费者消费一条消息的时间可以很久很久。
+
+RabbtiMQ 的Web 管理平台上可以看到当前队列中的“Ready”状态和“Unacknowledged”状态的消息数，也可以通过命令查看：
+```
+[root@gackey-pc ~]# rabbitmqctl list_queues name messages_ready messages_unacknowledged
+```
+
+消费者通过调用 channel.basicAck 方法，能够确认特定的消息
+```
+void basicAck(long deliveryTag, boolean multiple);
+```
+> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。它是一个64 位的长整型值，最大值是9223372036854775807  
+multiple（可选）：如果设置为 true，则表示确认deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只确认编号为deliveryTag 的这一条消息。
+
+##### 拒绝消息
+
+```
+// 采用channel.basicReject 方法来拒绝这个消息，一次只能拒绝一条消息 
+void basicReject(long deliveryTag, boolean requeue) throws IOException;
+
+// 如果想要批量拒绝消息，可以调用channel.basicNack 方法来实现
+void basicNack(long deliveryTag, boolean multiple, boolean requeue) throws IOException;
+```
+> deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。  
+requeue：如果设置为true，则RabbitMQ 会重新将这条消息存入队列，以便可以发送给下一个订阅的消费者；如果设置为false，则RabbitMQ立即会把消息从队列中移除，而不会把它发送给新的消费者。  
+multiple：如果设置为 true，则表示拒绝deliveryTag 编号以及之前所有未被当前消费者确认的消息。如果设置为 false，则只拒绝编号为deliveryTag 的这一条消息。
+
+<span style="color: red;font-weight: bold;">Tips</span>：将channel.basicReject 或者channel.basicNack 中的requeue 设置为false，可以启用“死信队列”的功能。死信队列可以通过检测被拒绝或者未送达的消息来追踪问题。  
+
+##### 手动恢复消息
+通常用channel.basicRecover 在消费者崩溃后恢复未处理的消息
+```
+// 将所有未确认的消息重新加入到原始队列，再次投递给消费者
+channel.basicRecover();
+
+// requeue 参数默认设置为true，则未被确认的消息会被重新加入到队列中，这样对于同一条消息来说，可能会被分配给与之前不同的消费者
+// 如果requeue 参数设置为false，那么同一条消息会被路由到死信队列（如果配置过），再分配给与之前相同的消费者
+channel.basicRecover(boolean requeue);
+```
+
+
+### 用RabbitTemplate时保障消息可靠性
+
+**一.确保消息路由到 RabbitMQ 的交换器**
+1. 路由保证的失败通知（mandatory+ReturnListener）  
+生产者的 RabbitTemplate 里开启路由失败通知并添加失败通知的回调
+```
+//如果消息不能被路由到队列，那么不应该继续尝试发送消息。如果这个消息没有被路由，那么它会返回一个异常
+rabbitTemplate.setMandatory(true);
+//当消息不能被路由或消费者拒绝消息时，这个方法会被调用
+rabbitTemplate.setReturnCallback(new ReturnCallback() {  
+        @Override  
+        public void returned(Exchange exchange, Message message, String cause) {  
+            System.out.println("Message returned. Cause: " + cause);  
+        }  
+    });
+```
+2. 备用交换器  
+在 RabbitMQ 的控制台配置 exchanges 时，Arguments 选项里点击 “Add Alternate exchange” 即可  
+
+**二.确保消息发送到 RabbitMQ 的交换器**
 - 启用消息确认机制  
 yml中的配置
 ```
@@ -636,25 +803,6 @@ rabbitTemplate.setConfirmCallback(new ConfirmCallback() {
         }  
     });  
 ```
-
-**二.确保消息路由到 RabbitMQ 的队列**
-- 路由保证
-1. 失败通知（mandatory+ReturnListener）  
-生产者的 RabbitTemplate 里开启路由失败通知并添加失败通知的回调
-```
-//如果消息不能被路由到队列，那么不应该继续尝试发送消息。如果这个消息没有被路由，那么它会返回一个异常
-rabbitTemplate.setMandatory(true);
-//当消息不能被路由或消费者拒绝消息时，这个方法会被调用
-rabbitTemplate.setReturnCallback(new ReturnCallback() {  
-        @Override  
-        public void returned(Exchange exchange, Message message, String cause) {  
-            System.out.println("Message returned. Cause: " + cause);  
-        }  
-    });
-```
-
-2. 备用交换器  
-在 RabbitMQ 的控制台配置 exchanges 时，Arguments 选项里点击 “Add Alternate exchange” 即可  
 
 **三.确保消息在 RabbitMQ 正常存储**
 - 交换器持久化

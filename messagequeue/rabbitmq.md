@@ -401,7 +401,7 @@ GetResponse basicGet(String queue, boolean autoAck) throws IOException;
 > queue：队列的名称  
 autoAck：设置是否自动确认。建议设成false，即不自动确认  
 
-<span style="color: red;font-weight: bold;">Tips</span>：Basic.Consume 将信道（Channel）置为接收模式，直到取消队列的订阅为止。在接收模式期间，RabbitMQ 会不断地推送消息给消费者，当然推送消息的个数还是会受到Basic.Qos 的限制。如果只想从队列获得单条消息而不是持续订阅，建议还是使用Basic.Get 进行消费。但是不能将Basic.Get 放在一个循环里来代替Basic.Consume，这样做会严重影响RabbitMQ的性能。如果要实现高吞吐量，消费者理应使用Basic.Consume 方法。  
+<span style="color: red;font-weight: bold;">Tips</span>：Basic.Consume 将信道（Channel）置为接收模式，直到取消队列的订阅为止。在接收模式期间，RabbitMQ 会不断地推送消息给消费者，当然推送消息的个数还是会受到Basic.Qos 的限制。如果只想从队列获得单条消息而不是持续订阅，建议还是使用Basic.Get 进行消费（Basic.Qos 的限制对拉模式消费无效）。但是不能将Basic.Get 放在一个循环里来代替Basic.Consume，这样做会严重影响RabbitMQ的性能。如果要实现高吞吐量，消费者理应使用Basic.Consume 方法。  
 
 ### 备份交换器
 Alternate Exchange，简称AE  
@@ -744,6 +744,7 @@ publisher confirm 的优势在于并不一定需要同步确认。改进方式�
 
 异步confirm 在客户端Channel 接口中提供的addConfirmListener 方法可以添加ConfirmListener 这个回调接口， 这个ConfirmListener 接口包含两个方法：handleAck 和handleNack，分别用来处理RabbitMQ 回传的Basic.Ack 和Basic.Nack 。在这两个方法中都包含有一个参数deliveryTag（在publisher confirm 模式下用来标记消息的唯一有序序号）。我们需要为每一个信道维护一个“unconfirm”的消息序号集合，每发送一条消息，集合中的元素加1。每当调用ConfirmListener 中的handleAck 方法时，“unconfirm”集合中删掉相应的一条（multiple 设置为false）或者多条（multiple 设置为true）记录。这个“unconfirm”集合最好采用有序集合SortedSet 的存储结构。  
 <span style="color: red;">建议使用异步confirm 的方式</span>
+
 ```
 // 异步confirm 的示例代码
 channel.confirmSelect();
@@ -918,6 +919,7 @@ rabbitTemplate.convertAndSend("exchange", "routing-key", message, new MessagePos
 **四.消费确认**
 - 手动确认  
 yml中配置
+
 ```
 spring:
     rabbitmq:
@@ -988,3 +990,77 @@ public class AckCustomer {
 
 ### 消息顺序性
 消息的顺序性是指消费者消费到的消息和发送者发布的消息的顺序是一致的。
+
+当出现下列情况时，消息的顺序性难以保证
+> 1. 有多个生产者同时发送消息，无法确定消息到达Broker 的前后顺序
+2. 生产者确认机制下，发生异常回滚，补偿发送会导致消息错序
+3. 给消息设置了不同的过期时间，并配置了死信队列，那么死信队列中的消息顺序与发送时的消息顺序也会不一致
+4. 为消息设置了优先级，也会导致顺序不一致
+5. 消费者拒绝消息，RabbitMQ 会重发，也会导致消息错序
+
+如果要保证消息的顺序性，需要业务中使用RabbitMQ 之后做进一步的处理，比如在消息体内添加全局有序标识（类似Sequence ID）来实现。
+
+### 消息重复性
+一般消息中间件的消息传输保障分为三个层级：
+> At most once：最多一次。消息可能会丢失，但绝不会重复传输。  
+> At least once：最少一次。消息绝不会丢失，但可能会重复传输。  
+> Exactly once：恰好一次。每条消息肯定会被传输一次且仅传输一次。  
+
+“最少一次”方式投递实现需要通过消息的可靠性保障。  
+“最多一次”方式，生产者随意发送，消费者随意消费，不过这样很难确保消息不会丢失。  
+“恰好一次”方式是RabbitMQ 目前无法保障的。受网络波动的影响，生产者可能重复发送，消费者也可能重复消费。
+
+去重处理一般是在业务客户端实现，比如引入GUID（Globally Unique Identifier）的概念。针对GUID，如果从客户端的角度去重，那么需要引入集中式缓存，必然会增加依赖复杂度，另外缓存的大小也难以界定。建议在实际生产环境中，业务方根据自身的业务特性进行去重，比如业务消息本身具备幂等性，或者借助Redis 等其他产品进行去重处理。
+
+### 消息分发
+当RabbitMQ 队列拥有多个消费者时，队列收到的消息将以轮询（round-robin）的分发方式发送给消费者。每条消息只会发送给订阅列表里的一个消费者。  
+如果现在负载加重，那么只需要创建更多的消费者来消费处理消息即可。
+
+默认情况下，如果有n 个消费者，那么RabbitMQ 会将第m 条消息分发给第m%n（取余的方式）个消费者，RabbitMQ 不管消费者是否消费并已经确认（Basic.Ack）了消息。  
+如果消费者的业务复杂度不同，会影响自身的消费能力，就会造成整体应用吞吐量的下降。
+
+使用channel.basicQos(int prefetchCount) 方法限制信道上的消费者所能保持的最大未确认消息的数量。  
+channel.basicQos 必须在channel.basicConsume 前设置才会生效。  
+RabbitMQ 会保存一个消费者的列表，每发送一条消息都会为对应的消费者计数加1，如果达到了所设定的上限，那么RabbitMQ 就不会向这个消费者再发送任何消息。直到消费者确认了某条消息之后，RabbitMQ 将相应的计数减1，之后消费者可以继续接收消息，直到再次到达计数上限。这种机制可以类比于TCP/IP 中的“滑动窗口”。
+
+<span style="color: red;font-weight: bold;">Tips</span>：Basic.Qos 的使用对于拉模式的消费方式无效。
+
+channel.basicQos 有三种类型的重载方法：
+
+```
+void basicQos(int prefetchCount) throws IOException;
+void basicQos(int prefetchCount, boolean global) throws IOException;
+void basicQos(int prefetchSize, int prefetchCount, boolean global) throws IOException;
+```
+
+> prefetchCount：表示消费者所能保持的最大未确认消息的数量，设置为0 则表示没有上限  
+prefetchCount：表示消费者所能接收未确认消息的总体大小的上限，单位为B，设置为0 则表示没有上限  
+global：当一个信道同时消费多个队列，并设置了prefetchCount 大于0 时，这个信道需要和各个队列协调以确保发送的消息都没有超过所限定的prefetchCount 的值，这样会使RabbitMQ 的性能降低，尤其是这些队列分散在集群中的多个Broker 节点之中。
+
+global参数 | AMQP 0-9-1 | RabbitMQ
+---- | :---- | :----
+false | 信道上所有的消费者都需要遵从prefetchCount 的限定值 | 信道上新的消费者需要遵从prefetchCount 的限定值
+true | 当前通信链路（Connection）上所有的消费者都需要遵从prefetchCount 的限定值 | 信道上所有的消费者都需要遵从prefetchCount 的限定值
+
+```
+// 同一个信道上有多个消费者，如果设置了prefetchCount 的值，那么都会生效
+Channel channel = ...;
+Consumer consumer1 = ...;
+Consumer consumer2 = ...;
+channel.basicQos(10); // Per consumer limit
+channel.basicConsume("my-queue1", false, consumer1);
+channel.basicConsume("my-queue2", false, consumer2);
+
+// 在订阅消息之前，既设置了global 为true 的限制，又设置了global 为false 的限制，RabbitMQ 会确保两者都会生效
+// 每个消费者最多只能收到3 个未确认的消息，两个消费者能收到的未确认的消息个数之和的上限为5
+Channel channel = ...;
+Consumer consumer1 = ...;
+Consumer consumer2 = ...;
+channel.basicQos(3, false); // Per consumer limit
+channel.basicQos(5, true); // Per channel limit
+channel.basicConsume("queue1", false, consumer1);
+channel.basicConsume("queue2", false, consumer2);
+```
+
+同时使用两种global模式，会增加RabbitMQ的负载，因为RabbitMQ 需要更多的资源来协调完成这些限制。  
+如无特殊需要，最好只使用global 为false 的设置，这也是默认的设置。

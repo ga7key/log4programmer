@@ -1067,6 +1067,99 @@ channel.basicConsume("queue2", false, consumer2);
 同时使用两种global模式，会增加RabbitMQ的负载，因为RabbitMQ 需要更多的资源来协调完成这些限制。  
 如无特殊需要，最好只使用global 为false 的设置，这也是默认的设置。
 
+
+
+### RabbitMQ 安装
+
+##### 安装Erlang
+1. 将erlang安装到/opt/erlang 目录下：
+
+```
+[root@hidden ~]# tar zxvf otp_src_19.3.tar.gz
+[root@hidden ~]# cd otp_src_19.3
+[root@hidden otp_src_19.3]# ./configure --prefix=/opt/erlang
+```
+
+2. 如果在安装的过程中出现类似“No ***** found”的提示，可根据提示信息安装相应的包，例如出现“No curses library functions found”报错：
+
+```
+[root@hidden otp_src_19.3]# yum install ncurses-devel
+```
+
+3. 安装Erlang：
+
+```
+[root@hidden otp_src_19.3]# make
+[root@hidden otp_src_19.3]# make install
+```
+
+4. 修改/etc/profile 配置文件，添加下面的环境变量：
+
+```
+ERLANG_HOME=/opt/erlang
+export PATH=$PATH:$ERLANG_HOME/bin
+export ERLANG_HOME
+```
+
+最后执行如下命令让配置文件生效：
+
+```
+[root@hidden otp_src_19.3]# source /etc/profile
+```
+
+5. 输入erl 命令来验证Erlang 是否安装成功：
+
+```
+[root@hidden ~]# erl
+Erlang/OTP 19 [erts-8.1] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
+Eshell V8.1 (abort with ^G)
+```
+
+##### RabbitMQ 的安装与运行
+
+```
+[root@hidden ~]# tar zvxf rabbitmq-server-generic-unix-3.6.10.tar.gz -C /opt
+[root@hidden ~]# cd /opt
+[root@hidden ~]# mv rabbitmq_server-3.6.10 rabbitmq
+```
+
+修改/etc/profile 文件，添加下面的环境变量：
+
+```
+export PATH=$PATH:/opt/rabbitmq/sbin
+export RABBITMQ_HOME=/opt/rabbitmq
+```
+
+之后执行 source /etc/profile 命令让配置文件生效。
+
+运行RabbitMQ，“-detached”参数是为了能够让RabbitMQ服务以守护进程的方式在后台运行：
+
+```
+rabbitmq-server –detached
+```
+
+默认情况下，访问RabbitMQ 服务的用户名和密码都是“guest”，这个账户有限制，默认只能通过本地网络（如localhost）访问，远程网络访问受限。
+
+添加新用户，用户名为“root”，密码为“root123”：
+
+```
+[root@hidden ~]# rabbitmqctl add_user root root123
+```
+
+为root 用户设置所有权限：
+
+```
+[root@hidden ~]# rabbitmqctl set_permissions -p / root ".*" ".*" ".*"
+```
+
+设置root 用户为管理员角色：
+
+```
+[root@hidden ~]# rabbitmqctl set_user_tags root administrator
+```
+
+
+
 ### RabbitMQ 管理
 **rabbitmqctl** 工具是用来管理RabbitMQ 中间件的命令行工具，它通过连接各个RabbitMQ 节点来执行所有操作。  
 rabbitmqctl 工具的标准语法如下（[]表示可选参数，{}表示必选参数）：

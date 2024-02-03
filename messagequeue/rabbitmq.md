@@ -1,3 +1,5 @@
+> RabbitMQ 版本为3.6.10
+
 ### RabbitMQ的优点
 - **可靠性**：RabbitMQ 使用一些机制来保证可靠性，如持久化、传输确认及发布确认等。
 - **灵活的路由**：在消息进入队列之前，通过交换器来路由消息。对于典型的路由功能，RabbitMQ 已经提供了一些内置的交换器来实现。针对更复杂的路由功能，可以将多个交换器绑定在一起，也可以通过插件机制来实现自己的交换器。
@@ -1064,3 +1066,743 @@ channel.basicConsume("queue2", false, consumer2);
 
 同时使用两种global模式，会增加RabbitMQ的负载，因为RabbitMQ 需要更多的资源来协调完成这些限制。  
 如无特殊需要，最好只使用global 为false 的设置，这也是默认的设置。
+
+### RabbitMQ 管理
+**rabbitmqctl** 工具是用来管理RabbitMQ 中间件的命令行工具，它通过连接各个RabbitMQ 节点来执行所有操作。  
+rabbitmqctl 工具的标准语法如下（[]表示可选参数，{}表示必选参数）：
+
+```
+rabbitmqctl [-n node] [-t timeout] [-q] {command} [command options...]
+```
+
+- [-n node]：默认节点是“rabbit@hostname”，此处的hostname 是主机名称。在一个名为“node.hidden.com”的主机上，RabbitMQ 节点的名称通常是rabbit@node（除非RABBITMQ_NODENAME 参数在启
+动时被设置成了非默认值）。hostname -s 命令的输出通常是“@”标志后的东西。
+- [-q]：使用-q 标志来启用quiet 模式，这样可以屏蔽一些消息的输出。 默认不开启quiet 模式。
+- [-t timeout]：操作超时时间（秒为单位），只适用于“list_xxx”类型的命令，默认是无穷大。
+
+操作命令示例：
+
+```
+[root@node1 ~]# rabbitmqctl list_vhosts
+Listing vhosts
+/
+[root@node1 ~]# rabbitmqctl list_vhosts -q
+/
+[root@node1 ~]# rabbitmqctl list_vhosts -q -t 1
+/
+[root@node1 ~]# rabbitmqctl list_vhosts -q -t 0
+Error: {timeout,0.0}
+```
+
+#### 多租户与权限
+每一个RabbitMQ 服务器都能创建虚拟的消息服务器，我们称之为虚拟主机（virtual host），简称为vhost。  
+每一个vhost 本质上是一个独立的小型RabbitMQ 服务器，拥有自己独立的队列、交换器及绑定关系等，并且它拥有自己独立的权限。vhost 就像是虚拟机与物理服务器一样，它们在各个实例间提供逻辑上的分离，为不同程序安全保密地运行数据，它既能将同一个RabbitMQ 中的众多客户区分开，又可以避免队列和交换器等命名冲突。vhost 之间是绝对隔离的，无法将vhost1 中的交换器与vhost2 中的队列进行绑定，这样既保证了安全性，又可以确保可移植性。  
+vhost 是AMQP 概念的基础，客户端在连接的时候需要制定一个vhost。RabbitMQ 默认创建的vhost 为“/”  
+
+**创建一个新的vhost**，大括号里的参数表示vhost 的名称：  
+rabbitmqctl add_vhost {vhost}
+```
+[root@node1 ~]# rabbitmqctl add_vhost vhost1
+Creating vhost "vhost1"
+```
+
+**罗列当前vhost 的相关信息**，目前vhostinfoitem 的取值有2 个：  
+rabbitmqctl list_vhosts [vhostinfoitem...]
+
+> name：表示vhost 的名称。  
+tracing：表示是否使用了RabbitMQ 的trace 功能。
+
+```
+[root@node1 ~]# rabbitmqctl list_vhosts name tracing
+Listing vhosts
+vhost1 false
+/ false
+[root@node1 ~]# rabbitmqctl trace_on
+Starting tracing for vhost "/"
+[root@node1 ~]# rabbitmqctl list_vhosts name tracing
+Listing vhosts
+vhost1 false
+/ true
+```
+
+**删除vhost** ，大括号里面的参数表示vhost 的名称。同时也会删除其下所有的队列、交换器、绑定关系、用户权限、参数和策略等信息：  
+rabbitmqctl delete_vhost {vhost}
+
+```
+[root@node1 ~]# rabbitmqctl delete_vhost vhost1
+Deleting vhost "vhost1"
+```
+
+AMQP 协议中并没有指定权限在vhost 级别还是在服务器级别实现，由具体的应用自定义。  
+在RabbitMQ 中，权限控制则是以vhost 为单位的。当创建一个用户时，用户通常会被指派给至少一个vhost，并且只能访问被指派的vhost 内的队列、交换器和绑定关系等。因此，RabbitMQ中的授予权限是指在vhost 级别对用户而言的权限授予。  
+**授予权限命令**为：  
+rabbitmqctl set_permissions [-p vhost] {user} {conf} {write} {read}
+> vhost：授予用户访问权限的vhost 名称，可以设置为默认值，即vhost 为“/”。  
+user：可以访问指定vhost 的用户名。  
+conf：一个用于匹配用户在哪些资源上拥有可配置权限的正则表达式，可配置指的是队列和交换器的创建及删除之类的操作。  
+write：一个用于匹配用户在哪些资源上拥有可写权限的正则表达式，可写指的是发布消息。  
+read：一个用于匹配用户在哪些资源上拥有可读权限的正则表达式，可读指与消息有关的操作，包括读取消息及清空整个队列等。  
+
+AMQP 命令与权限的映射关系：
+
+AMQP 命令 | 可 配 置 | 可 写 | 可 读
+:---- | :---- | :---- | :----
+Exchange.Declare | exchange | |
+Exchange.Declare(with AE) | exchange | exchange(AE) | exchange
+Exchange.Delete | exchange | |
+Queue.Declare | queue | |
+Queue.Declare(with DLX) | queue | exchange (DLX) | queue
+Queue.Delete | queue | |
+Exchange.Bind | | exchange (destination) | exchange (source)
+Exchange.Unbind | | exchange (destination) | exchange (source)
+Queue.Bind | | queue | exchange
+Queue.Unbind | | queue | exchange
+Basic.Publish | | exchange |
+Basic.Get | | | queue
+Basic.Consume | | | queue
+Queue.Purge | | | queue
+
+```
+// 授予root 用户可访问虚拟主机vhost1，并在所有资源上都具备可配置、可写及可读的权限
+[root@node1 ~]# rabbitmqctl set_permissions -p vhost1 root ".*" ".*" ".*"
+Setting permissions for user "root" in vhost "vhost1"
+// 授予root 用户可访问虚拟主机vhost2，在以“queue”开头的资源上具备可配置权限，并在所有资源上拥有可写、可读的权限
+[root@node1 ~]# rabbitmqctl set_permissions -p vhost2 root "^queue.*" ".*" ".*"
+Setting permissions for user "root" in vhost "vhost2"
+```
+
+**清除权限的命令**为：  
+rabbitmqctl clear_permissions [-p vhost] {username}
+> vhost ：设置禁止用户访问的虚拟主机的名称，默认为“/”。  
+username ：表示禁止访问特定虚拟主机的用户名称。
+
+```
+[root@node1 ~]# rabbitmqctl clear_permissions -p vhost1 root
+Clearing permissions for user "root" in vhost "vhost1"
+```
+
+**显示虚拟主机上的权限**：  
+rabbitmqctl list_permissions [-p vhost]
+
+**显示用户的权限**：  
+rabbitmqctl list_user_permissions {username}
+
+```
+[root@node1 ~]# rabbitmqctl list_permissions -p vhost1
+Listing permissions in vhost "vhost1"
+root .* .* .*
+[root@node1 ~]# rabbitmqctl list_user_permissions root
+Listing permissions for user "root"
+/ .* .* .*
+vhost1 .* .* .*
+```
+
+#### 用户管理
+用户是访问控制（Access Control）的基本单元，且单个用户可以跨越多个vhost 进行授权。针对一至多个vhost，用户可以被赋予不同级别的访问权限，并使用标准的用户名和密码来认证用户。
+
+**创建用户**：  
+rabbitmqctl add_user {username} {password}  
+> username ：表示要创建的用户名称  
+password ：表示创建用户登录的密码  
+
+```
+// 创建一个用户名为root、密码为root123 的用户
+[root@node1 ~]# rabbitmqctl add_user root root123
+Creating user "root"
+```
+
+**更改指定用户的密码**：  
+rabbitmqctl change_password {username} {newpassword}
+> username ：表示要变更密码的用户名称  
+newpassword ：表示要变更的新的密码
+
+```
+// 将root 用户的密码变更为root321
+[root@node1 ~]# rabbitmqctl change_password root root321
+Changing password for user "root"
+```
+
+**清除用户的密码**：  
+rabbitmqctl clear_password {username}
+> username ：表示要清除密码的用户名称
+
+**通过密码来验证用户**：  
+rabbitmqctl authenticate_user {username} {password}
+> username ：表示需要被验证的用户名称  
+password ：表示密码
+
+```
+// 采用密码root321 来验证root 用户
+[root@node1 ~]# rabbitmqctl authenticate_user root root321
+Authenticating user "root"
+Success
+// 采用密码root322 来验证root 用户
+[root@node1 ~]# rabbitmqctl authenticate_user root root322
+Authenticating user "root"
+Error: failed to authenticate user "root"
+```
+
+**删除用户**：  
+rabbitmqctl delete_user {username}
+> username ：表示要删除的用户名称
+
+```
+[root@node1 ~]# rabbitmqctl delete_user root
+Deleting user "root"
+```
+
+**罗列当前的所有用户**：  
+rabbitmqctl list_users
+
+```
+[root@node1 ~]# rabbitmqctl list_users
+Listing users
+guest [administrator]
+root []
+```
+
+每个结果行都包含用户名称，其后紧跟用户的角色（tags）。用户的角色分为5 种类型：
+> none：无任何角色。新创建的用户的角色默认为none。  
+management：可以访问Web 管理页面。  
+policymaker：包含management 的所有权限，并且可以管理策略（Policy）和参数（Parameter）  
+monitoring：包含management 的所有权限，并且可以看到所有连接、信道及节点相关的信息。  
+administartor：包含monitoring 的所有权限，并且可以管理用户、虚拟主机、权限、策略、参数等。administator 代表了最高的权限。
+
+**设置用户的角色**：  
+rabbitmqctl set_user_tags {username} {tag ...}
+> username ：参数表示需要设置角色的用户名称  
+tag ：参数用于设置0 个、1 个或者多个的角色，设置之后任何之前现有的身份都会被删除
+
+```
+[root@node1 ~]# rabbitmqctl set_user_tags root
+Setting tags for user "root" to []
+[root@node1 ~]# rabbitmqctl list_users -q
+guest [administrator]
+root []
+[root@node1 ~]# rabbitmqctl set_user_tags root policymaker,management
+Setting tags for user "root" to ['policymaker,management']
+[root@node1 ~]# rabbitmqctl list_users -q
+guest [administrator]
+root [policymaker,management]
+```
+
+#### Web 端管理
+为了运行rabbitmqctl 工具，当前的用户需要拥有访问Erlang cookie 的权限，由于服务器可能是以guest 或者root 用户身份来运行的，因此需要获得这些文件的访问权限，这样就引申出来一些权限管理的问题。  
+RabbitMQ management 插件可以提供Web 管理界面用来管理如前面所述的虚拟主机、用户等，也可以用来管理队列、交换器、绑定关系、策略、参数等，还可以用来监控RabbitMQ服务的状态及一些数据统计类信息，基本上能够涵盖所有RabbitMQ 管理的功能。
+
+先启用RabbitMQ management 插件。RabbitMQ 提供了很多的插件，默认存放在$RABBITMQ_HOME/plugins 目录下：
+
+```
+[root@node1 plugins]# ls -al
+-rw-r--r-- 1 root root 270985 Oct 25 19:45 amqp_client-3.6.10.ez
+-rw-r--r-- 1 root root 225671 Oct 25 19:45 cowboy-1.0.4.ez
+(省略若干项…)
+```
+
+启动rabbitmq_management-3.6.10.ez 插件，使用rabbitmq-plugins 命令，其语法格式为：  
+rabbitmq-plugins [-n node] {command} [command options...]
+
+**启动插件**：  
+rabbitmq-plugins enable [plugin-name]
+
+**关闭插件**：  
+rabbitmq-plugins disable [plugin-name]
+
+**查看当前插件的使用情况**：  
+rabbitmq-plugins list
+
+> 标记为[E*]的为显式启动，而[e*]为隐式启动，如显式启动rabbitmq_management 插件会同时隐式启动amqp_client、cowboy、cowlib 等另外5 个插件。
+
+```
+[root@node1 ~]# rabbitmq-plugins list
+Configured: E = explicitly enabled; e = implicitly enabled
+| Status: * = running on rabbit@node1
+|/
+[e*] amqp_client 3.6.10
+[e*] cowboy 1.0.4
+[e*] cowlib 1.0.2
+[ ] rabbitmq_amqp1_0 3.6.10
+[E*] rabbitmq_management 3.6.10
+[e*] rabbitmq_management_agent 3.6.10
+[e*] rabbitmq_web_dispatch 3.6.10
+[ ] rabbitmq_management_visualiser 3.6.10
+(省略若干项…)
+```
+
+开启rabbitmq_management 插件之后还需要重启RabbitMQ 服务才能使其正式生效。之后就可以通过浏览器访问http://localhost:15672/ ，这样会出现一个认证登录的界面，可以通过默认的guest/guest 的用户名和密码来登录。如果访问的IP 地址不是本地地址，比如在192.168.0.2的主机上访问http://192.168.0.3:15672 的Web 管理页面，使用默认的guest 账户是访问不了的。需要使用一个具有非none 的用户角色的非guest 账户来访问Web 管理页面。
+
+某些情况下，用户能够正确登录，但是除了页面头部和尾部没有任何其它内容呈现。此时清空下浏览器的缓存即可。
+
+#### 应用与集群管理
+- rabbitmqctl stop [pid_file]  
+用于停止运行RabbitMQ 的Erlang 虚拟机和RabbitMQ 服务应用。  
+如果指定了pid_file，还需要等待指定进程的结束。其中pid_file 是通过调用rabbitmq-server 命令启动RabbitMQ 服务时创建的，默认情况下存放于Mnesia 目录中，可以通过RABBITMQ_PID_FILE 这个环境变量来改变存放路径。注意，如果使用rabbitmq-server –detach 这个带有-detach 后缀的命令来启动RabbitMQ 服务则不会生成pid_file 文件。
+
+```
+[root@node1 ~]# rabbitmqctl stop /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit\@node1.pid
+Stopping and halting node rabbit@node1
+[root@node1 ~]# rabbitmqctl stop
+Stopping and halting node rabbit@node1
+```
+
+- rabbitmqctl shutdown  
+用于停止运行RabbitMQ 的Erlang 虚拟机和RabbitMQ 服务应用。  
+执行这个命令会阻塞直到Erlang 虚拟机进程退出。如果RabbitMQ 没有成功关闭，则会返回一个非零值。  
+这个命令和rabbitmqctl stop 不同的是，它不需要指定pid_file 而可以阻塞等待指定进程的关闭。
+
+```
+[root@node1 ~]# rabbitmqctl shutdown
+Shutting down RabbitMQ node rabbit@node1 running at PID 1706
+Waiting for PID 1706 to terminate
+RabbitMQ node rabbit@node1 running at PID 1706 successfully shut down
+```
+
+- rabbitmqctl stop_app  
+停止RabbitMQ 服务应用，但是Erlang 虚拟机还是处于运行状态。  
+此命令的执行优先于其他管理操作（这些管理操作需要先停止RabbitMQ 应用），比如rabbitmqctl reset。
+
+```
+[root@node1 ~]# rabbitmqctl stop_app
+Stopping rabbit application on node rabbit@node1
+```
+
+- rabbitmqctl start_app  
+启动RabbitMQ 应用。  
+此命令典型的用途是在执行了其他管理操作之后，重新启动之前停止的RabbitMQ 应用，比如rabbitmqctl reset。
+
+```
+[root@node1 ~]# rabbitmqctl start_app
+Starting node rabbit@node1
+```
+
+- rabbitmqctl wait [pid_file]  
+等待RabbitMQ 应用的启动。  
+它会等到pid_file 的创建，然后等待pid_file 中所代表的进程启动。当指定的进程没有启动RabbitMQ 应用而关闭时将会返回失败。
+
+```
+[root@node1 ~]# rabbitmqctl wait /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit\@node1.pid
+Waiting for rabbit@node1
+pid is 3468
+```
+
+- rabbitmqctl reset  
+将RabbitMQ 节点重置还原到最初状态。包括从原来所在的集群中删除此节点，从管理数据库中删除所有的配置数据，如已配置的用户、vhost 等，以及删除所有的持久化消息。  
+执行rabbitmqctl reset 命令前必须停止RabbitMQ 应用（比如先执行rabbitmqctl stop_app）。
+
+```
+[root@node1 ~]# rabbitmqctl stop_app
+Stopping rabbit application on node rabbit@node1
+[root@node1 ~]# rabbitmqctl reset
+Resetting node rabbit@node
+```
+
+- rabbitmqctl force_reset  
+强制将RabbitMQ 节点重置还原到最初状态。  
+rabbitmqctl force_reset 命令不论当前管理数据库的状态和集群配置是什么，都会无条件地重置节点。它只能在数据库或集群配置已损坏的情况下使用。  
+执行rabbitmqctl force_reset 命令前必须先停止RabbitMQ 应用。
+
+```
+[root@node1 ~]# rabbitmqctl stop_app
+Stopping rabbit application on node rabbit@node1
+[root@node1 ~]# rabbitmqctl force_reset
+Forcefully resetting node rabbit@node1
+```
+
+- rabbitmqctl rotate_logs {suffix}  
+指示RabbitMQ 节点轮换日志文件。RabbitMQ节点会将原来的日志文件中的内容追加到“原始名称+后缀”的日志文件中，然后再将新的日志内容记录到新创建的日志中（与原日志文件同名）。  
+当目标文件不存在时，会重新创建。如果不指定后缀suffix，则日志文件只是重新打开而不会进行轮换。
+
+```
+// 原日志文件为rabbit@node1.log 和rabbit@node1-sasl.log
+// 轮换日志之后，原日志文件中的内容就被追加到rabbit@node1.log.bak 和 rabbit@node1-sasl.log.bak 日志中
+// 之后重新建立rabbit@node1.log 和rabbit@node1-sasl.log 文件用来接收新的日志
+[root@node1 rabbitmq]# ll
+-rw-r--r-- 1 root root 1024127 Oct 18 11:56 rabbit@node1.log
+-rw-r--r-- 1 root root 720553 Oct 17 19:16 rabbit@node1-sasl.log
+[root@node1 rabbitmq]# rabbitmqctl rotate_logs .bak
+Rotating logs to files with suffix ".bak"
+[root@node1 rabbitmq]# ll
+-rw-r--r-- 1 root root 0 Oct 18 12:05 rabbit@node1.log
+-rw-r--r-- 1 root root 1024202 Oct 18 12:05 rabbit@node1.log.bak
+-rw-r--r-- 1 root root 0 Oct 18 12:05 rabbit@node1-sasl.log
+-rw-r--r-- 1 root root 720553 Oct 18 12:05 rabbit@node1-sasl.log.bak
+```
+
+- rabbitmqctl hipe_compile {directory}  
+将部分RabbitMQ 代码用HiPE（HiPE 是指High Performance Erlang，是Erlang 版的JIT）编译，并且将编译后的.beam 文件（beam 文件是Erlang 编译器生成的文件格式，可以直接加载到Erlang 虚拟机中运行的文件格式）保存到指定的文件目录中。如果这个目录不存在则会自行创建。如果这个目录中原本有任何.beam 文件，则会在执行编译前被删除。  
+如果要使用预编译的这些文件，则需要设置RABBITMQ_SERVER_CODE_PATH 这个环境变量来指定hipe_compile 调用的路径。
+
+```
+[root@node1 rabbitmq]# rabbitmqctl hipe_compile
+/opt/rabbitmq/tmp/rabbit-hipe/ebin
+HiPE compiling: |-----------------------------------------------|
+|###############################################|
+Compiled 57 modules in 55s
+```
+
+- rabbitmqctl join_cluster {cluster_node} [--ram]  
+将节点加入指定集群中。在这个命令执行前需要停止RabbitMQ 应用并重置节点
+
+- rabbitmqctl cluster_status  
+显示集群的状态
+
+- rabbitmqctl change_cluster_node_type {disc|ram}  
+修改集群节点的类型。在这个命令执行前需要停止RabbitMQ 应用
+
+- rabbitmqctl forget_cluster_node [--offline]  
+将节点从集群中删除，允许离线执行
+
+- rabbitmqctl update_cluster_nodes {clusternode}  
+在集群中的节点应用启动前咨询clusternode 节点的最新信息，并更新相应的集群信息。  
+这个和join_cluster 不同，它不加入集群。考虑这样一种情况，节点A 和节点B 都在集群中，当节点A 离线了，节点C 又和节点B 组成了一个集群，然后节点B 又离开了集群，当A 醒来的时候，它会尝试联系节点B，但是这样会失败，因为节点B 已经不在集群中了。
+
+```
+##假设已有node1 和node 组成的集群
+##1.初始状态
+[root@node1 ~]# rabbitmqctl cluster_status
+Cluster status of node rabbit@node1
+[{nodes,[{disc,[rabbit@node1,rabbit@node2]}]}, {running_nodes,[rabbit@node2,rabbit@node1]},
+{cluster_name,<<"rabbit@node1">>}, {partitions,[]}, {alarms,[{rabbit@node2,[]},{rabbit@node1,[]}]}]
+##2.关闭node1 节点的应用
+[root@node1 ~]# rabbitmqctl stop_app
+Stopping rabbit application on node rabbit@node1
+##3.之后将node3 加入到集群中（rabbitmqctl join_cluster rabbit@node3）
+##4.再将node2 节点的应用关闭
+##5.最后启动node1 节点的应用，此时会报错
+[root@node1 ~]# rabbitmqctl start_app
+Starting node rabbit@node1
+BOOT FAILED
+===========
+Timeout contacting cluster nodes: [rabbit@node2].
+……(省略)
+##6.如果在启动node1 节点的应用之前咨询node3 并更新相关集群信息则可以解决这个问题
+[root@node1 ~]# rabbitmqctl update_cluster_nodes rabbit@node3
+Updating cluster nodes for rabbit@node1 from rabbit@node3
+[root@node1 ~]# rabbitmqctl start_app
+Starting node rabbit@node1
+##7.最终集群状态
+[root@node1 ~]# rabbitmqctl cluster_status
+Cluster status of node rabbit@node1
+[{nodes,[{disc,[rabbit@node1,rabbit@node3]}]}, {running_nodes,[rabbit@node3,rabbit@node1]},
+{cluster_name,<<"rabbit@node1">>}, {partitions,[]}, {alarms,[{rabbit@node3,[]},{rabbit@node1,[]}]}]
+```
+
+- rabbitmqctl force_boot  
+确保节点可以启动，即使它不是最后一个关闭的节点。  
+通常情况下，当关闭整个RabbitMQ 集群时，重启的第一个节点应该是最后关闭的节点，因为它可以看到其他节点所看不到的事情。但是有时会有一些异常情况出现，比如整个集群都掉电而所有节点都认为它不是最后一个关闭的。在这种情况下，可以调用rabbitmqctl force_boot 命令，这就告诉节点可以无条件地启动节点。  
+在此节点关闭后，集群的任何变化，它都会丢失。如果最后一个关闭的节点永久丢失了，那么需要优先使用rabbitmqctl forget_cluster_node --offline 命令，因为它可以确保镜像队列的正常运转。
+
+```
+[root@node2 ~]# rabbitmqctl force_boot
+Forcing boot for Mnesia dir /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit@node2
+[root@node2 ~]# rabbitmq-server –detached
+```
+
+- rabbitmqctl sync_queue [-p vhost] {queue}  
+指示未同步队列queue 的slave 镜像可以同步master 镜像行的内容。  
+同步期间此队列会被阻塞（所有此队列的生产消费者都会被阻塞），直到同步完成。此条命令执行成功的前提是队列queue 配置了镜像。  
+注意，未同步队列中的消息被耗尽后，最终也会变成同步，此命令主要用于未耗尽的队列。
+
+```
+[root@node1 ~]# rabbitmqctl sync_queue queue
+Synchronising queue 'queue' in vhost '/'
+```
+
+- rabbitmqctl cancel_sync_queue [-p vhost] {queue}  
+取消队列queue 同步镜像的操作
+
+```
+[root@node1 ~]# rabbitmqctl cancel_sync_queue queue
+Stopping synchronising queue 'queue' in vhost '/'
+```
+
+- rabbitmqctl set_cluster_name {name}  
+设置集群名称。集群名称在客户端连接时会通报给客户端。  
+Federation 和Shovel 插件也会有用到集群名称的地方。集群名称默认是集群中第一个节点的名称。  
+在Web 管理界面的右上角有个“（change）”的地方，点击也可以修改集群名称。
+
+```
+[root@node1 ~]# rabbitmqctl set_cluster_name cluster_hidden
+Setting cluster name to cluster_hidden
+[root@node1 ~]# rabbitmqctl cluster_status
+Cluster status of node rabbit@node1
+[{nodes,[{disc,[rabbit@node1,rabbit@node2]}]},{running_nodes,[rabbit@node2,rabbit@node1]},
+{cluster_name,<<"cluster_hidden">>},{partitions,[]},{alarms,[{rabbit@node2,[]},{rabbit@node1,[]}]}]
+```
+
+#### 服务端状态
+服务器状态的查询会返回一个以制表符（Tab键）分隔的列表。  
+该命令接受一个可选的vhost 参数以显示其结果，默认值为“/”。
+
+- rabbitmqctl list_queues [-p vhost] [queueinfoitem ...]  
+此命令返回队列的详细信息，如果无[-p vhost]参数，将显示默认的vhost 为“/”中的队列详情。  
+queueinfoitem 参数用于指示哪些队列的信息项会包含在结果集中，结果集的列顺序将匹配参数的顺序。  
+queueinfoitem 可以是下面列表中的任何值。
+
+> name：队列名称。  
+durable：队列是否持久化。  
+auto_delete：队列是否自动删除。  
+arguments：队列的参数。  
+policy：应用到队列上的策略名称。  
+pid：队列关联的Erlang 进程的ID。  
+owner_pid：处理排他队列连接的Erlang 进程ID。如果此队列是非排他的，此值将为空。  
+exclusive：队列是否是排他的。  
+exclusive_consumer_pid：订阅到此排他队列的消费者相关的信道关联的Erlang进程ID。如果此队列是非排他的，此值将为空。  
+exclusive_consumer_tag：订阅到此排他队列的消费者的consumerTag。如果此队列是非排他的，此值将为空。  
+messages_ready：准备发送给客户端的消息个数。  
+messages_unacknowledged：发送给客户端但尚未应答的消息个数。  
+messages：准备发送给客户端和未应答消息的总和。  
+messages_ready_ram：驻留在内存中messages_ready 的消息个数。  
+messages_unacknowledged_ram：驻留在内存中messages_unacknowledged的消息个数。  
+messages_ram：驻留在内存中的消息总数。  
+messages_persistent：队列中持久化消息的个数。对于非持久化队列来说总是0。  
+messages_bytes：队列中所有消息的大小总和。这里不包括消息属性或者任何其他开销。
+messages_bytes_ready：准备发送给客户端的消息的大小总和。
+messages_bytes_unacknowledged：发送给客户端但尚未应答的消息的大小总和。  
+messages_bytes_ram：驻留在内存中的messages_bytes。  
+messages_bytes_persistent：队列中持久化的messages_bytes。  
+disk_reads：从队列启动开始，已从磁盘中读取该队列的消息总次数。  
+disk_writes：从队列启动开始，已向磁盘队列写消息的总次数。  
+consumer：消费者数目。  
+consumer_utilisation：队列中的消息能够立刻投递给消费者的比率，介于0 和1之间。这个受网络拥塞或者Basic.Qos 的影响而小于1。  
+memory：与队列相关的Erlang 进程所消耗的内存字节数，包括栈、堆及内部结构。  
+slave_pids：如果队列是镜像的，列出所有slave 镜像的pid。  
+synchronised_slave_pids：如果队列是镜像的，列出所有已经同步的slave 镜像的pid。  
+state：队列状态。正常情况下是running；如果队列正常同步数据可能会有“{syncing, MsgCount}”的状态；如果队列所在的节点掉线了，则队列显示状态为down（此时大多数的queueinfoitems 也将不可用）。  
+
+如果没有指定queueinfoitems，那么此命令将显示队列的名称和消息的个数。
+
+```
+[root@node1 ~]# rabbitmqctl list_queues -p vhost1 name disk_writes disk_reads -q
+queue4 3390 0
+queue5 0 0
+```
+
+- rabbitmqctl list_exchanges [-p vhost] [exchangeinfoitem ...]  
+返回交换器的详细细节，如果无[-p vhost]参数，将显示默认的vhost 为“/”中的交换器详情。  
+exchangeinfoitem 参数用于指示哪些信息项会包含在结果集中，结果集的列顺序将匹配参数的顺序。  
+exchangeinfoitem 可以是下面列表中的任何值。
+
+> name：交换器的名称。  
+type：交换器的类型。  
+durable：设置是否持久化。durable 设置为true 表示持久化，反之是非持久化。持久化可以将交换器信息存盘，而在服务器重启的时候不会丢失相关信息。  
+auto_delete：设置是否自动删除。  
+internal：是否是内置的。  
+arguments：其他一些结构化参数，比如alternate-exchange。  
+policy：应用到交换器上的策略名称。  
+
+如果没有指定exchangeinfoitem，那么此命令将显示交换器的名称和类型。
+
+```
+[root@node1 ~]# rabbitmqctl list_exchanges name type durable auto_delete internal arguments policy -q
+amq.rabbitmq.trace  topic   true false true  []
+amq.headers         headers true false false []
+                    direct  true false false []
+amq.match           headers true false false []
+amq.topic           topic   true false false []
+amq.fanout          fanout  true false false []
+amq.rabbitmq.log    topic   true false true  []
+amq.direct          direct  true false false []
+```
+
+- rabbitmqctl list_bindings [-p vhost] [bindinginfoitem ...]  
+返回绑定关系的细节，如果无[-p vhost]参数，将显示默认的vhost 为“/”中的绑定关系详情。  
+bindinginfoitem 参数用于指示哪些信息项会包含在结果集中，结果集的列顺序将匹配参数的顺序。  
+bindinginfoitem 可以是下面列表中的任何值。
+
+> source_name：绑定中消息来源的名称。  
+source_kind：绑定中消息来源的类别。  
+destination_name：绑定中消息目的地的名称。  
+destination_kind：绑定中消息目的地的种类。  
+routing_key：绑定的路由键。  
+arguments：绑定的参数。  
+
+如果没有指定bindinginfoitem，那么将显示所有的条目。
+
+```
+// 交换器exchange1 和队列queue1 通过rk1 进行绑定，还有一个独立的队列queue2。显示的第一行是默认的交换器与queue1 进行绑定，这个是RabbitMQ 内置的功能。
+[root@node1 ~]# rabbitmqctl list_bindings -q
+          exchange queue1 queue queue1 []
+          exchange queue2 queue queue2 []
+exchange1 exchange queue1 queue rk1    []
+```
+
+- rabbitmqctl list_connections [connectioninfoitem ...]  
+返回TCP/IP 连接的统计信息。  
+connectioninfoitem 参数用于指示哪些信息项会包含在结果集中，结果集的列顺序将匹配参数的顺序。  
+connectioninfoitem 可以是下面列表中的任何值。
+
+> pid：与连接相关的Erlang 进程ID。  
+name：连接的名称。  
+port：服务器端口。  
+host：返回反向DNS 获取的服务器主机名称，或者IP 地址，或者未启用。  
+peer_port：服务器对端端口。当一个客户端与服务器连接时，这个客户端的端口就是peer_port。  
+peer_host：返回反向DNS 获取的对端主机名称，或者IP 地址，或者未启用。  
+ssl：是否启用SSL。  
+ssl_protocol：SSL 协议，如tlsv1。  
+ssl_key_exchange：SSL 密钥交换算法，如rsa。  
+ssl_cipher：SSL 加密算法，如aes_256_cbc。  
+ssl_hash：SSL 哈希算法，如sha。  
+peer_cert_subject：对端的SSL 安全证书的主题，基于RFC4514 的形式。  
+peer_cert_issuer：对端SSL 安全证书的发行者，基于RFC4514 的形式。  
+peer_cert_validity：对端SSL 安全证书的有效期。  
+state：连接状态，包括starting、tuning、opening、running、flow、blocking、blocked、closing 和closed 这几种。  
+channels：该连接中的信道个数。  
+protocol：使用的AMQP 协议的版本，当前是{0,9,1}或者{0,8,0}。注意，如果客户端请求的是AMQP 0-9 的连接，RabbitMQ 也会将其视为0-9-1。  
+auth_mechanism：使用的SASL 认证机制，如PLAIN、AMQPLAIN、EXTERNAL、RABBIT-CR-DEMO 等。  
+user：与连接相关的用户名。  
+vhost：与连接相关的vhost 的名称。  
+timeout：连接超时/协商的心跳间隔，单位为秒。  
+frame_max：最大传输帧的大小，单位为B。  
+channel_max：此连接上信道的最大数量。如果值0，则表示无上限，但客户端一般会将0 转变为65535。  
+client_properties：在建立连接期间由客户端发送的信息属性。  
+recv_oct：收到的字节数。  
+recv_cnt：收到的数据包个数。  
+send_oct：发送的字节数。  
+send_cnt：发送的数据包个数。  
+send_pend：发送队列大小。  
+connected_at：连接建立的时间戳。  
+
+如果没有指定connectioninfoitem，那么会显示user、peer_host、peer_port 和state 这几项信息。
+
+```
+[root@node1 ~]# rabbitmqctl list_connections -q
+root 192.168.0.22 57304 running
+root 192.168.0.22 57316 running
+```
+
+- rabbitmqctl list_channels [channelinfoitem ...]  
+返回当前所有信道的信息。  
+channelinfoitem 参数用于指示哪些信息项会包含在结果集中，结果集的列顺序将匹配参数的顺序。  
+channelinfoitem 可以是下面列表中的任何值。
+
+> pid：与连接相关的Erlang 进程ID。  
+connection：信道所属连接的Erlang 进程ID。  
+name：信道的名称。  
+number：信道的序号。  
+user：与信道相关的用户名称。  
+vhost：与信道相关的vhost。  
+transactional：信道是否处于事务模式。  
+confirm：信道是否处于publisher confirm 模式。  
+consumer_count：信道中的消费者的个数。  
+messages_unacknowledged：已投递但是还未被ack 的消息个数。  
+messages_uncommitted：已接收但是还未提交事务的消息个数。  
+acks_uncommitted：已ack 收到但是还未提交事务的消息个数。  
+messages_unconfirmed：已发送但是还未确认的消息个数。如果信道不处于publisher confirm 模式下，则此值为0。  
+perfetch_count：新消费者的Qos 个数限制。0 表示无上限。  
+global_prefetch_count：整个信道的Qos 个数限制。0 表示无上限。  
+
+如果没有指定channelinfoitem，那么会显示pid、user、consumer_count 和messages_unacknowledged 这几项信息。
+
+```
+[root@node1 ~]# rabbitmqctl list_channels -q
+<rabbit@node1.1.631.0> root 0 0
+<rabbit@node1.1.643.0> root 1 0
+```
+
+- rabbitmqctl list_consumers [-p vhost]  
+列举消费者信息。  
+每行将显示由制表符分隔的已订阅队列的名称、相关信道的进程标识、consumerTag、是否需要消费端确认、prefetch_count 及参数列表这些信息。
+
+```
+[root@node1 ~]# rabbitmqctl list_consumers -p default -q
+queue4 <rabbit@node1.1.1628.11> consumer_zzh true 0 []
+```
+
+- rabbitmqctl status  
+显示Broker 的状态，比如当前Erlang 节点上运行的应用程序、RabbitMQ/Erlang 的版本信息、OS 的名称、内存及文件描述符等统计信息。
+
+- rabbitmqctl node_health_check  
+对RabbitMQ 节点进行健康检查，确认应用是否正常运行、list_queues 和list_channels是否能够正常返回等。
+
+```
+[root@node1 ~]# rabbitmqctl node_health_check
+Timeout: 70.0 seconds
+Checking health of node rabbit@node1
+Health check passed
+```
+
+- rabbitmqctl environment  
+显示每个运行程序环境中每个变量的名称和值。
+
+- rabbitmqctl report  
+为所有服务器状态生成一个服务器状态报告，并将输出重定向到一个文件。
+
+```
+[root@node1 ~]# rabbitmqctl report > report.txt
+```
+
+- rabbitmqctl eval {expr}  
+执行任意Erlang 表达式。  
+用户、Parameter、vhost、权限等都可以通过rabbitmqctl 工具来完成创建（或删除）的操作，而交换器、队列及绑定关系的创建（或删除）操作可以通过rabbitmqctl eval {expr} 实现。
+
+```
+// 返回rabbitmqctl连接的节点名称
+[root@node1 ~]# rabbitmqctl eval 'node().'
+rabbit@node1
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：若要删除所有的交换器、队列及绑定关系，删除对应的vhost 就可以“一键搞定”，而不需要一个个遍历删除。
+
+#### HTTP API 接口管理
+RabbitMQ Management 插件不仅提供了Web 管理界面，还提供了HTTP API 接口来方便调用。  
+HTTP API 是完全基于RESTful 风格的，不同的HTTP API 接口所对应的HTTP 方法各不相同，这里一共涉及4 种HTTP 方法：GET、PUT、DELETE 和POST。
+
+    GET 方法一般用来获取如集群、节点、队列、交换器等信息。  
+    PUT 方法用来创建资源，如交换器、队列之类的。  
+    DELETE 方法用来删除资源。  
+    POST 方法也是用来创建资源的，与PUT 不同的是，POST 创建的是无法用具体名称的资源。比如绑定关系（bindings）和发布消息（publish）无法指定一个具体的名称。
+
+所有的HTTP API 接口都需要HTTP 基础认证（使用标准的RabbitMQ 用户数据库），默认的是guest/guest（非localhost 的不能使用这组认证，除非特殊设置）
+
+```
+// 通过curl 命令创建队列queue ，“%2F”是指默认的vhost，即“/”，这类特殊字符在HTTP URL 中是需要转义的
+[root@node1 ~]# curl -i -u root:root123 -H "content-type:application/json"
+-XPUT -d '{"auto_delete":false,"durable":true,"node":"rabbit@node2"}'
+http://192.168.0.2:15672/api/queues/%2F/queue
+HTTP/1.1 201 Created
+server: Cowboy
+date: Fri, 25 Aug 2017 06:03:17 GMT
+content-length: 0
+content-type: application/json
+vary: accept, accept-encoding, origin
+
+// 通过GET 方法来获取队列queue 的信息
+[root@node1 ~]# curl -i -u root:root123 –XGET http://192.168.0.2:15672/api/queues/%2F/queue
+
+// 通过DELETE 方法来删除队列queue
+[root@node1 ~]# curl -i -u root:root123 -XDELETE http://192.168.0.2:15672/api/queues/%2F/queue
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：Web 管理界面左下角的“HTTP API”可以跳转到相应的“RabbitMQ Management HTTP API”帮助页面，里面有详细的接口信息。
+
+#### rabbitmqadmin
+rabbitmqadmin是RabbitMQ Management 插件提供的功能，它会包装HTTP API 接口，使其调用显得更加简洁方便。
+
+rabbitmqadmin 是需要安装的，可以点击Web 管理页面左下角的“Command Line”跳转到“rabbitmqadmin”页面进行下载，或者通过下面的示例进行下载并添加可执行权限。在使用rabbitmqadmin前还要确保已经成功安装Python。
+
+```
+[root@node1 ~]# wget http://192.168.0.2:15672/cli/rabbitmqadmin
+[root@node1 ~]# chmod +x rabbitmqadmin
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：通过rabbitmqadmin --help 命令可以获得相应的使用方式。
+
+```
+// 创建队列
+[root@node1 ~]# ./rabbitmqadmin -u root -p root123 declare queue name=queue1
+queue declared
+// 显示队列
+[root@node1 ~]# ./rabbitmqadmin list queues
++--------+----------+
+| name   | messages |
++--------+----------+
+| queue1 | 0        |
++--------+----------+
+// 删除队列
+[root@node1 ~]# ./rabbitmqadmin -u root -p root123 delete queue name=queue1
+queue deleted
+```
+
+
+### RabbitMQ 配置

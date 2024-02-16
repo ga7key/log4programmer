@@ -6,8 +6,7 @@
 * [消息队列](messagequeue/messagequeue.md)
 * [Linux运维](linuxOps/concurrency.md)
 * [Windows运维](windowsOps/network.md)
-* 字符编码
-    * [ASCII码对照表](characterEncoding/ASCII.md)
+* [版本控制](versionControl/git.md)
 <!-- Others -->
 * [其它](others/)
 * [笔记](notes/)

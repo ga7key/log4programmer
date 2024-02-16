@@ -1,3 +1,5 @@
+### ASCII码对照表
+
 1. ASCII码 是现今最通用的单字节编码系统，并等同于国际标准ISO/IEC 646 。在这个页面，你可以找到8位的256个字符、ASCII码表和Windows-1252 (code page 1252，它是国际标准ISO 8859-1的一个扩展字符集) 标准保持一致;
 2. ASCII码 是 American Standard Code for Information Interchange 的缩写，而不是ASCⅡ(罗马数字2)，有很多人在这个地方产生误解;
 3. ASCII码 规范于1967年第一次发布，最后一次更新是在1986年，它包含了33个控制字符（具有某些特殊功能但是无法显示的字符）和95个可显示字符。  

@@ -1,8 +1,8 @@
 > 基于Redis 2.9，适用于Redis 2.6至Redis 3.0
 
-### 数据结构与对象
+## 数据结构与对象
 
-#### SDS
+### SDS
 simple dynamic string，简单动态字符串，Redis的默认字符串表示。  
 字符串、哈希表、列表、集合等数据类型的键值对底层都是由SDS 实现的，因为Redis 需要表示一个可以被修改的字符串值。  
 SDS还被用作缓冲区（buffer）：AOF模块中的AOF缓冲区，以及客户端状态中的输入缓冲区。
@@ -91,7 +91,7 @@ SDS的API都是二进制安全的（binary-safe），所有SDS API都会以处�
 
 例如，重用<string.h>/strcasecmp函数来对比SDS保存的字符串和另一个C字符串；重用<string.h>/strcat函数来将SDS保存的字符串追加到一个C字符串的后面。
 
-##### C字符串和SDS之间的区别
+#### C字符串和SDS之间的区别
 
 C字符串 | SDS
  :---- | :----
@@ -121,3 +121,95 @@ sdsrange | 保留SDS指定区间内的数据，不在区间内的数据会被覆
 sdstrim | 接受一个SDS和一个C字符串作为参数，从SDS中移除所有在C字符串中出现过的字符 | O(N²)
 sdscmp | 对比两个SDS字符串是否相同 | O(N)，N为两个SDS中较短的那个SDS的长度
 
+
+### 链表
+链表提供了高效的节点重排能力，以及顺序性的节点访问方式，并且可以通过增删节点来灵活地调整链表的长度。
+
+因为Redis使用的C语言并没有内置这种数据结构，所以Redis构建了自己的链表实现。
+
+当一个列表键包含了数量比较多的元素，又或者列表中包含的元素都是比较长的字符串时，Redis就会使用链表作为列表键的底层实现。  
+发布与订阅、慢查询、监视器等功能也用到了链表，Redis服务器本身还使用链表来保存多个客户端的状态信息，以及使用链表来构建客户端输出缓冲区（output buffer）。
+
+```
+redis> LLEN integers
+(integer) 1024
+redis> LRANGE integers 0 2
+1)"1"
+2)"2"
+3)"3"
+```
+
+integers列表键的底层实现就是一个链表，链表中的每个节点都保存了一个整数值。
+
+每个链表节点使用一个adlist.h/listNode结构来表示：  
+```
+typedef struct listNode {
+    //前置节点
+    struct listNode * prev;
+    //后置节点
+    struct listNode * next;
+    //节点的值
+    void * value;
+}listNode;
+```
+
+多个listNode可以通过prev和next指针组成双端链表：  
+![double-ended_listNode](../images/redis/2024-02-17_双端链表.png ':size=50%')
+
+用adlist.h/list来持有链表：  
+```
+typedef struct list {
+    //表头指针
+    listNode * head;
+    //表尾指针
+    listNode * tail;
+    //链表所包含的节点数量
+    unsigned long len;
+    //复制链表节点所保存的值
+    void *(*dup)(void *ptr);
+    //释放链表节点所保存的值
+    void (*free)(void *ptr);
+    //对比链表节点所保存的值和另一个输入值是否相等
+    int (*match)(void *ptr,void *key);
+} list;
+```
+
+由一个list结构和三个listNode结构组成的链表：  
+![list+listNode](../images/redis/2024-02-17_list+listNode.png ':size=50%')
+
+##### Redis的链表实现的特性
+- 双端：链表节点带有prev和next指针，获取某个节点的前置节点和后置节点的复杂度都是O(1)
+- 无环：表头节点的prev指针和表尾节点的next指针都指向NULL，对链表的访问以NULL为终点
+- 带表头指针和表尾指针：通过list结构的head指针和tail指针，程序获取链表的表头节点和表尾节点的复杂度为O(1)
+- 带链表长度计数器：程序使用list结构的len属性来对list持有的链表节点进行计数，程序获取链表中节点数量的复杂度为O(1)
+- 多态：链表节点使用void*指针来保存节点值，并且可以通过list结构的dup、free、match三个属性为节点值设置类型特定函数，所以链表可以用于保存各种不同类型的值
+
+#### 链表和链表节点的API
+
+ 函数 | 作用 |时间复杂度
+ :----: | :---- | :----
+listSetDupMethod | 将给定的函数设置为链表的节点值复制函数 | O(1)，复制函数可以通过链表的dup属性获得
+listGetDupMethod | 返回链表当前正在使用的节点值复制函数 | O(1)
+listSetFreeMethod | 将给定的函数设置为链表的节点值释放函数 | O(1)，释放函数可以通过链表的free属性获得
+listGetFree | 返回链表当前正在使用的节点值释放函数 | O(1)
+listSetMatchMethod | 将给定的函数设置为链表的节点值对比函数 | O(1)，对比函数可以通过链表的match属性获得
+listGetMatchMethod | 返回链表当前正在使用的节点值对比函数 | O(1)
+listLength | 返回链表的长度（包含多少节点）| O(1)，链表长度可以通过链表的len属性获得
+listFirst | 返回链表的表头节点 | O(1)，表头节点可以通过链表的head属性获得
+listLast | 返回链表的表尾节点 | O(1)，表尾节点可以通过链表的tail属性获得
+listPrevNode | 返回给定节点的前置节点 | O(1)，前置节点可以通过节点的prev属性获得
+listNextNode | 返回给定节点的后置节点 | O(1)，后置节点可以通过节点的next属性获得
+listNodeValue | 返回给定节点目前正在保存的值 | O(1)，节点值可以通过节点的value属性获得
+listCreate | 创建一个不包含任何节点的新链表 | O(1)
+listAddNodeHead | 将一个包含给定值的新节点添加到给定链表的表头 | O(1)
+listAddNodeTail | 将一个包含给定值的新节点添加到给定链表的表尾 | O(1)
+listInsertNode | 将一个包含给定值的新节点添加到给定节点的之前或之后 | O(1)
+listSearchKey | 查找并返回链表中包含给定值的节点 | O(N)，N为链表长度
+listIndex | 返回链表在给定索引上的节点 | O(N)，N为链表长度
+listDelNode | 从链表中删除给定节点 | O(N)，N为链表长度
+listRotate | 将链表的表尾节点弹出，然后将被弹出的节点插入到链表表头，成为新的表头节点 | O(1)
+listDup | 复制一个给定链表的副本 | O(N)，N为链表长度
+listRelease | 释放给定链表，以及链表中的所有节点 | O(N)，N为链表长度
+
+
+### 字典

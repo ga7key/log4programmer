@@ -2,7 +2,7 @@
 * [Spring Cloud](springcloud/springAnalysis.md)
 * [Java](java/JVM.md)
 * [算法](algorithm/dataStructure.md)
-* [Redis](redis/redis.md)
+* [Redis](redis/redis_command.md)
 * [消息队列](messagequeue/messagequeue.md)
 * [Linux运维](linuxOps/concurrency.md)
 * [Windows运维](windowsOps/network.md)

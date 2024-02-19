@@ -9,7 +9,7 @@ SDS还被用作缓冲区（buffer）：AOF模块中的AOF缓冲区，以及客�
 
 在Redis里，C语言的字符串只会作为字符串字面量（string literal）用在一些无须对字符串值进行修改的地方，比如打印日志。
 
-每个sds.h/sdshdr结构表示一个SDS值：
+每个**sds.h/sdshdr**结构表示一个SDS值：
 
 ```
 struct sdshdr {
@@ -141,7 +141,7 @@ redis> LRANGE integers 0 2
 
 integers列表键的底层实现就是一个链表，链表中的每个节点都保存了一个整数值。
 
-每个链表节点使用一个adlist.h/listNode结构来表示：  
+每个链表节点使用一个**adlist.h/listNode**结构来表示：  
 ```
 typedef struct listNode {
     //前置节点
@@ -156,7 +156,7 @@ typedef struct listNode {
 多个listNode可以通过prev和next指针组成双端链表：  
 ![double-ended_listNode](../images/redis/2024-02-17_双端链表.png ':size=50%')
 
-用adlist.h/list来持有链表：  
+用**adlist.h/list**来持有链表：  
 ```
 typedef struct list {
     //表头指针
@@ -409,6 +409,78 @@ redis> ZRANGE fruit-price 0 2 WITHSCORES
 
 **跳跃表**的结构图示：  
 ![skiplist](../images/redis/2024-02-18_skiplist.png ':size=50%')
+
+位于图片最左边的是zskiplist结构，位于zskiplist结构右方的是四个zskiplistNode结构。
+
+<span style="color: red;font-weight: bold;">Tips</span>：注意表头节点和其他节点的构造是一样的：表头节点也有后退指针、分值和成员对象，不过表头节点的这些属性都不会被用到，所以图中省略了这些部分，只显示了表头节点的各个层。
+
+**redis.h/zskiplist**结构的定义：  
+```
+typedef struct zskiplist {
+    //表头节点和表尾节点
+    structz skiplistNode *header, *tail;
+    //表中节点的数量（表头节点不计算在内）
+    unsigned long length;
+    //表中层数最大的节点的层数（表头节点的层数不计算在内）
+    int level;
+} zskiplist;
+```
+
+> - header和tail指针分别指向跳跃表的表头和表尾节点，通过这两个指针，程序定位表头节点和表尾节点的复杂度为O(1)
+> - 通过使用length属性来记录节点的数量，程序可以在O(1)复杂度内返回跳跃表的长度
+> - level属性则用于在O(1)复杂度内获取跳跃表中层高最大的那个节点的层数量，注意表头节点的层高并不计算在内
+
+**redis.h/zskiplistNode**结构的定义：  
+```
+typedef struct zskiplistNode {
+    //层
+    struct zskiplistLevel {
+        //前进指针
+        struct zskiplistNode *forward;
+        //跨度
+        unsigned int span;
+    } level[];
+    //后退指针
+    struct zskiplistNode *backward;
+    //分值
+    double score;
+    //成员对象
+    robj *obj;
+} zskiplistNode;
+```
+
+> - 层：跳跃表节点的level数组可以包含多个元素，每个元素都包含一个指向其他节点的指针，程序可以通过这些层来加快访问其他节点的速度，一般来说，层的数量越多，访问其他节点的速度就越快。  
+每次创建一个新跳跃表节点的时候，程序都根据幂次定律（power law，越大的数出现的概率越小）随机生成一个介于1和32之间的值作为level数组的大小，这个大小就是层的“高度”。  
+上图节点中用L1、L2、L3等字样标记节点的各个层，L1代表第一层，L2代表第二层……
+> - 前进指针：每个层都有一个指向表尾方向的前进指针（level[i].forward属性），用于从表头向表尾方向访问节点。  
+上图连线上带有数字的箭头就代表前进指针。
+> - 跨度：层的跨度（level[i].span属性）用于记录两个节点之间的距离。  
+跨度是用来计算排位（rank）的：在查找某个节点的过程中，将沿途访问过的所有层的跨度累计起来，得到的结果就是目标节点在跳跃表中的排位。  
+上图连线上带有数字的箭头上的数字就代表跨度。
+例如：在跳跃表中查找分值为3.0、成员对象为o3的节点，查找的过程只经过了一个层，并且层的跨度为3，所以目标节点在跳跃表中的排位为3。
+> - 后退指针：节点中用BW字样标记节点的后退指针，用于从表尾向表头方向访问节点：跟可以一次跳过多个节点的前进指针不同，因为每个节点只有一个后退指针，所以每次只能后退至前一个节点。
+> - 分值：是一个double类型的浮点数，跳跃表中的所有节点都按分值从小到大来排序。  
+上图各个节点中的1.0、2.0和3.0是节点所保存的分值。
+> - 成员对象：是一个指针，它指向一个字符串对象，而字符串对象则保存着一个SDS值。  
+上图各个节点中的o1、o2和o3是节点所保存的成员对象。
+
+<span style="color: red;font-weight: bold;">Tips</span>：在同一个跳跃表中，各个节点保存的成员对象必须是唯一的，但是各个节点保存的分值却可以是相同的：分值相同的节点将按照成员对象在字典序中的大小来进行排序，成员对象较小的节点会排在前面（靠近表头的方向），而成员对象较大的节点则会排在后面（靠近表尾的方向）。
+
+#### 跳跃表API
+函数 | 作用 | 时间复杂度
+ :----: | :---- | :----
+zslCreate | 创建一个新的跳跃表 | O(1)
+zslFree | 释放给定跳跃表，以及表中包含的所有节点 | O(N)，N为跳跃表长度
+zslInsert | 将包含给定成员和分值的新节点添加到跳跃表中 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslDelete | 删除跳跃表中包含给定成员和分值的节点 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslGetRank | 返回包含给定成员和分值的节点在跳跃表中的排位 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslGetElementByRank | 返回跳跃表在给定排位上的节点 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslIsInRange | 给定一个分值范围(range)，比如0到15，20到28，如果跳跃表中至少一个节点的分值在其范围内，那么返回1，否则返回0 | O(1)，通过表头节点和表尾节点检测
+zslFirstInRange |给定一个分值范围，返回跳跃表中第一个符合之歌范围的节点 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslLastInRange | 给定一个分值范围，返回跳跃表中最后一个符合这个范围的节点 | 平均O(logN)，最坏O(N)，N为跳跃表长度
+zslDeleteRangeByScore | 给定一个分值范围，删除跳跃表中所有在这个范围内的节点 | O(N)，N为被删除节点数量
+zslDeleteRangeByRank | 给定一个排位范围，删除跳跃表中所有在这个范围内的节点 | O(N)，N为被删除节点数量
+
 
 ### 整数集合
 

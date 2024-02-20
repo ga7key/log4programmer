@@ -40,3 +40,10 @@
 504 | Gateway Timeout | 由作为代理或网关的服务器使用，表示不能及时地从远程服务器获得应答
 505 | HTTP Version Not Supported | 服务器不支持请求中所指明的 HTTP 版本
 
+
+### 服务端口号
+服务与端口号的映射关系excel文件：[service_port](../files/others/service-names-port-numbers.xlsx)
+
+https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml
+
+

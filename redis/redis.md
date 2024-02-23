@@ -704,3 +704,82 @@ ziplistLen | 返回压缩列表目前包含的节点数量 | 节点数量小于6
 
 
 ## 对象
+Redis对象系统包含字符串对象、列表对象、哈希对象、集合对象和有序集合对象这五种类型，每种对象都用到了至少一种数据结构。  
+Redis在执行命令之前，根据对象的类型来判断一个对象是否可以执行给定的命令。使用对象的另一个好处是，我们可以针对不同的使用场景，为对象设置多种不同的数据结构实现，从而优化对象在不同场景下的使用效率。  
+Redis的对象系统还实现了基于引用计数技术的内存回收机制，当程序不再使用某个对象的时候，这个对象所占用的内存就会被自动释放；另外，Redis还通过引用计数技术实现了对象共享机制，这一机制可以在适当的条件下，通过让多个数据库键共享同一个对象来节约内存。  
+Redis的对象带有访问时间记录信息，该信息可以用于计算数据库键的空转时长，在服务器启用了maxmemory功能的情况下，空转时长较大的那些键可能会优先被服务器删除。
+
+### 对象的类型与编码
+在Redis的数据库中新创建一个键值对时，我们至少会创建两个对象，一个对象用作键值对的键（键对象），另一个对象用作键值对的值（值对象）。
+
+Redis中的每个对象都由一个redisObject结构表示：
+```
+typedef struct redisObject {
+    //类型
+    unsigned type:4;
+    //编码
+    unsigned encoding:4;
+    //指向底层实现数据结构的指针
+    void *ptr;
+    // ...
+} robj;
+```
+
+###### 类型
+类型常量 | 对象的名称 | TYPE命令的输出
+ :---- | :---- | :----
+REDIS_STRING | 字符串对象 | string
+REDIS_LIST | 列表对象 | list
+REDIS_HASH | 哈希对象 | hash
+REDIS_SET | 集合对象 | set
+REDIS_ZSET | 有序集合对象 | zset
+
+对于Redis数据库保存的键值对来说，键总是一个字符串对象，而值则可以是字符串对象、列表对象、哈希对象、集合对象或者有序集合对象的其中一种。
+
+执行TYPE命令时，返回的结果为数据库键对应的值对象的类型：
+```
+redis> TYPE msg
+string
+redis> TYPE profile
+hash
+```
+
+###### 编码
+对象的ptr指针指向对象的底层实现数据结构，而这些数据结构由对象的encoding属性决定。
+
+编码常量 | 底层的数据结构 | OBJECT ENCODING命令的输出
+ :---- | :---- | :----
+REDIS_ENCODING_INT | long类型的整数 | int
+REDIS_ENCODING_EMBSTR | embstr编码的简单动态字符串 | embstr
+REDIS_ENCODING_RAW | 简单动态字符串 | raw
+REDIS_ENCODING_HT | 字典 | hashtable
+REDIS_ENCODING_LINKEDLIST | 双端链表 | linkedlist
+REDIS_ENCODING_ZIPLIST | 压缩列表 | ziplist
+REDIS_ENCODING_INTSET | 整数集合 | intset
+REDIS_ENCODING_SKIPLIST | 跳跃表和字典 | skiplist
+
+使用OBJECT ENCODING命令可以查看一个数据库键的值对象的编码：
+```
+redis> OBJECT ENCODING msg
+"embstr"
+redis> OBJECT ENCODING numbers
+"hashtable"
+```
+
+##### 类型与编码的关系图 
+![type_encoding](../images/redis/2024-02-24_type_encoding.png 'size=50%')
+
+
+### 字符串对象
+
+
+### 列表对象
+
+
+### 哈希对象
+
+
+### 集合对象
+
+
+### 有序集合对象

@@ -767,7 +767,7 @@ redis> OBJECT ENCODING numbers
 ```
 
 ##### 类型与编码的关系图 
-![type_encoding](../images/redis/2024-02-24_type_encoding.png 'size=50%')
+![type_encoding](../images/redis/2024-02-24_type_encoding.png ':size=50%')
 
 
 ### 字符串对象

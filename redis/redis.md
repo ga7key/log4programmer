@@ -771,9 +771,83 @@ redis> OBJECT ENCODING numbers
 
 
 ### 字符串对象
+字符串对象的编码可以是int、raw或者embstr。
+
+如果一个字符串对象保存的是整数值，并且这个整数值可以用long类型来表示，那么字符串对象会将整数值保存在字符串对象结构的ptr属性里面（将void*转换成long），并将字符串对象的编码设置为int。  
+![stringobject_int](../images/redis/2024-02-27_stringobject_int.png ':size=20%')
+
+如果字符串对象保存的是一个字符串值，并且这个字符串值的长度大于32字节，那么字符串对象将使用一个简单动态字符串（SDS）来保存这个字符串值，并将对象的编码设置为raw。  
+![stringobject_raw](../images/redis/2024-02-27_stringobject_raw.png ':size=60%')
+
+如果字符串对象保存的是一个字符串值，并且这个字符串值的长度小于等于32字节，那么字符串对象将使用embstr编码的方式来保存这个字符串值。  
+![stringobject_embstr](../images/redis/2024-02-27_stringobject_embstr.png ':size=50%')
+
+使用embstr编码的字符串对象来保存短字符串值有以下好处：
+> - embstr编码将创建字符串对象所需的内存分配次数从raw编码的两次降低为一次。
+> - 释放embstr编码的字符串对象只需要调用一次内存释放函数，而释放raw编码的字符串对象需要调用两次内存释放函数。
+> - 因为embstr编码的字符串对象的所有数据都保存在一块连续的内存里面，所以这种编码的字符串对象比起raw编码的字符串对象能够更好地利用缓存带来的优势。
+
+用long double类型表示的浮点数在Redis中也是作为字符串值来保存的。
+
+字符串对象保存各类型值的编码方式：
+
+值 | 编码
+ :---- | :----
+long类型的整数 | int
+字符串；long double类型的浮点数；长度太大的long类型整数 | embstr或者raw
+
+##### 编码转换
+- 当整数是long类型无法表示的，或者更新后不再是整数，编码会从int转换为raw
+- embstr编码的字符串对象是只读的，没有修改的命令，当对字符串进行修改，编码会从embstr转换为raw
+
+##### 部分字符串命令的实现
+命令 | int编码的实现方法 | embstr编码的实现方法 | raw编码的实现方法
+ :---- | :---- | :---- | :----
+SET | 使用int编码保存值 | 使用embstr编码保存值 | 使用raw编码保存值
+GET | 拷贝对象所保存的整数值，将这个拷贝转换成字符串值，然后向客户端返回字符串值 | 直接向客户端返回字符串值 | 直接向客户端返回字符串值
+APPEND | 将对象转换成raw编码，按raw编码的方式操作 | 将对象转换成raw编码，按raw编码的方式操作 | 调用sdscatlen函数，将给定字符串追加到原字符串末尾
+INCRBYFLOAT | 取出整数值并转换成long double类型的浮点数，对这个浮点数进行加法计算，然后将结果保存 | 取出整数值并尝试转换成long double类型的浮点数，对这个浮点数进行加法计算，然后将结果保存。如果字符串值不能被转换成浮点数，就向客户端返回一个错误 | 取出整数值并尝试转换成long double类型的浮点数，对这个浮点数进行加法计算，然后将结果保存。如果字符串值不能被转换成浮点数，就向客户端返回一个错误
+INCRBY | 对整数值进行加法计算，结果作为整数保存起来 | 不能执行此命令，向客户端返回一个错误 | 不能执行此命令，向客户端返回一个错误
+DECRBY | 对整数值进行减法计算，结果作为整数保存起来 | 不能执行此命令，向客户端返回一个错误 | 不能执行此命令，向客户端返回一个错误
+STRLEN | 拷贝对象所保存的整数值，将其转换成字符串值，计算并返回这个字符串值的长度 | 调用sdslen函数，返回字符串的长度 | 调用sdslen函数，返回字符串的长度
+SETRANGE | 将对象转换成raw编码，按raw编码的方式操作 | 将对象转换成raw编码，按raw编码的方式操作 | 将字符串特定索引上的值设置为给定的字符
+GETRANGE | 拷贝对象所保存的整数值，将其转换成字符串值，然后取出并返回字符串指定索引上的字符 | 直接取出并返回字符串指定索引上的字符 | 直接取出并返回字符串指定索引上的字符
 
 
 ### 列表对象
+列表对象的编码可以是ziplist或者linkedlist。
+
+ziplist编码的列表对象使用压缩列表作为底层实现，每个压缩列表节点（entry）保存了一个列表元素。  
+![listobject_ziplist](../images/redis/2024-02-27_listobject_ziplist.png ':size=50%')
+
+linkedlist编码的列表对象使用双端链表作为底层实现，每个双端链表节点（node）都保存了一个字符串对象，而每个字符串对象都保存了一个列表元素。  
+![listobject_linkedlist](../images/redis/2024-02-27_listobject_linkedlist.png ':size=50%')
+
+注意，linkedlist编码的列表对象在底层的双端链表结构中包含了多个字符串对象。字符串对象是Redis五种类型的对象中唯一一种会被其他四种类型对象嵌套的对象。  
+为了简化字符串对象的表示，上图用StringObject来表示，下面是完整的字符串对象表示：  
+![listobject_linkedlistNode](../images/redis/2024-02-27_listobject_linkedlistNode.png ':size=50%')
+
+##### 编码转换
+不能满足以下两个条件的列表对象需要使用linkedlist编码：
+
+    - 列表对象保存的所有字符串元素的长度都小于64字节；
+    - 列表对象保存的元素数量小于512个；
+
+<span style="color: red;font-weight: bold;">Tips</span>：以上两个条件的上限值是可以修改的，具体请看配置文件中关于list-max-ziplist-value选项和list-max-ziplist-entries选项的说明。
+
+##### 部分列表命令的实现
+命令 | ziplist编码的实现方法 | linkedlist编码的实现方法
+ :---- | :---- | :----
+LPUSH | 调用ziplistPush函数，将新元素推入到压缩列表的表头 | 调用listAddNodeHead函数，将新元素推入到双端链表的表头
+RPUSH | 调用ziplistPush函数，将新元素推入到压缩列表的表尾 | 调用listAddNodeTail函数，将新元素推入到双端链表的表尾
+LPOP | 调用ziplistIndex函数定位压缩列表的表头节点，向客户端返回表头节点的元素，然后调用ziplistDelete函数删除表头节点 | 调用listFirst函数定位双端链表的表头节点，向客户端返回表头节点的元素，然后调用listDelNode函数删除表头节点
+RPOP | 调用ziplistIndex函数定位压缩列表的表尾节点，向客户端返回表尾节点的元素，然后调用ziplistDelete函数删除表尾节点 | 调用listLast函数定位双端链表的表尾节点，向客户端返回表尾节点的元素，然后调用listDelNode函数删除表尾节点
+LINDEX | 调用ziplistIndex函数定位压缩列表中的指定节点，向客户端返回该节点的元素 | 调用listIndex函数定位双端链表中的指定节点，向客户端返回该节点的元素
+LLEN | 调用ziplistLen函数返回压缩列表的长度 | 调用listLength函数返回双端链表的长度
+LINSERT | 插入新节点到压缩列表的表头或表尾，使用ziplistPush函数；插入新节点到压缩列表的其他位置，使用ziplistInsert函数 | 调用listInsertNode函数，将新节点插入到双端链表的指定位置
+LREM | 遍历压缩列表节点，并调用ziplistDelete函数删除包含给定元素的节点 | 遍历双端链表节点，并调用listDelNode函数删除包含给定元素的节点
+LTRIM | 调用ziplistDeleteRange函数，删除压缩列表中所有不在指定索引范围内的节点 | 遍历双端链表节点，并调用listDelNode函数删除链表中所有不在指定索引范围内的节点
+LSET | 调用ziplistDelete函数删除压缩列表指定索引上的节点，然后调用ziplistInsert函数，将一个包含给定原色的新节点插入到相容索引上 | 调用listIndex函数，定位到双端链表指定索引上的节点，然后通过赋值操作更新节点的值
 
 
 ### 哈希对象

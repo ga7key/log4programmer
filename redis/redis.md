@@ -828,10 +828,10 @@ linkedlist编码的列表对象使用双端链表作为底层实现，每个双�
 ![listobject_linkedlistNode](../images/redis/2024-02-27_listobject_linkedlistNode.png ':size=50%')
 
 ##### 编码转换
-不能满足以下两个条件的列表对象需要使用linkedlist编码：
+满足以下两个条件的列表对象使用ziplist编码，否则需要使用linkedlist编码：
 
-    - 列表对象保存的所有字符串元素的长度都小于64字节；
-    - 列表对象保存的元素数量小于512个；
+    列表对象保存的所有字符串元素的长度都小于64字节；
+    列表对象保存的元素数量小于512个；
 
 <span style="color: red;font-weight: bold;">Tips</span>：以上两个条件的上限值是可以修改的，具体请看配置文件中关于list-max-ziplist-value选项和list-max-ziplist-entries选项的说明。
 
@@ -851,6 +851,31 @@ LSET | 调用ziplistDelete函数删除压缩列表指定索引上的节点，然
 
 
 ### 哈希对象
+哈希对象的编码可以是ziplist或者hashtable。
+
+ziplist编码的哈希对象使用压缩列表作为底层实现，每当有新的键值对要加入到哈希对象时，程序会先将保存了键的压缩列表节点推入到压缩列表表尾，然后再将保存了值的压缩列表节点推入到压缩列表表尾。  
+![hashobject_ziplist](../images/redis/2024-02-28_hashobject_ziplist.png ':size=50%')
+
+hashtable编码的哈希对象使用字典作为底层实现，哈希对象中的每个键值对都使用一个字典键值对来保存。  
+![hashobject_hashtable](../images/redis/2024-02-28_hashobject_hashtable.png ':size=40%')
+
+##### 编码转换
+当哈希对象可以同时满足以下两个条件时，哈希对象使用ziplist编码，否则需要使用hashtable编码：
+
+    哈希对象保存的所有键值对的键和值的字符串长度都小于64字节；
+    哈希对象保存的键值对数量小于512个；
+
+<span style="color: red;font-weight: bold;">Tips</span>：这两个条件的上限值是可以修改的，具体请看配置文件中关于hash-max-ziplist-value选项和hash-max-ziplist-entries选项的说明。
+
+##### 部分哈希命令的实现
+命令 | ziplist编码的实现方法 | hashtable编码的实现方法
+ :---- | :---- | :----
+HSET | 调用ziplistPush函数将键推入到压缩列表的表尾，再次调用ziplistPush将值推入到压缩列表的表尾 | 调用dictAdd函数将新节点添加到字典里
+HGET | 调用ziplistFind函数在压缩列表中查找给定键对应的节点，然后调用ziplistNext函数将指针移动到键节点旁边的值节点，最后返回值节点 | 调用dictFind函数，在字典中查找给定键，然后调用dictGetVal函数，返回该键对应的值
+HEXISTS | 调用ziplistFind函数，在压缩列表中查找给定键对应的节点，如果找到的话说明键值对存在 | 调用dictFind函数在字典中查找给定键对应的节点，如果找到的话说明键值对存在
+HDEL | 调用ziplistFind函数在压缩列表中查找给定键对应的节点，然后将对应的键节点、旁边的值节点都删除 | 调用dictDelete函数将给定键对应的键值对从字典中删除
+HLEN | 调用ziplistLen函数，获取压缩列表包含的节点数量，将该数量除以2，结果就是压缩列表保存的键值对的数量 | 调用dictSize函数，返回字典包含的键值对数量，即哈希对象包含的键值对数量
+HGETALL | 遍历整个压缩列表，用ziplistGet函数返回所有键和值 | 遍历整个字典，用dictGetKey函数返回字典的键，用dictGetVal函数返回字典的值
 
 
 ### 集合对象

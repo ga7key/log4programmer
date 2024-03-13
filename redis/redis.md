@@ -1381,13 +1381,23 @@ BGREWRITEAOF和BGSAVE两个命令都由子进程执行，彼此不会冲突，�
 RDB文件的载入工作是在服务器启动时自动执行的，所以Redis并没有专门用于载入RDB文件的命令，只要Redis服务器在启动时检测到RDB文件存在，它就会自动载入RDB文件。  
 服务器在载入RDB文件期间，会一直处于阻塞状态，直到载入工作完成为止。
 
+创建RDB文件的实际工作由rdb.c/rdbSave函数完成，SAVE命令和BGSAVE命令会以不同的方式调用这个函数。  
+载入RDB文件的实际工作由rdb.c/rdbLoad函数完成。
+
+##### RDB与AOF在载入时的优先级
 - 如果服务器开启了AOF持久化功能，那么服务器会优先使用AOF文件来还原数据库状态。
 - 只有在AOF持久化功能处于关闭状态时，服务器才会使用RDB文件来还原数据库状态。
 
 ![data_loading_process](../images/redis/2024-03-07_data_loading_process.png)
 
-创建RDB文件的实际工作由rdb.c/rdbSave函数完成，SAVE命令和BGSAVE命令会以不同的方式调用这个函数。  
-载入RDB文件的实际工作由rdb.c/rdbLoad函数完成。
+<span style="color: red;font-weight: bold;">Tips</span>：使用RDB恢复数据流程  
+
+    1. 停止redis服务
+    2. 关闭AOF，将配置文件中的appendonly改为no；删除aof文件
+    3. 将要恢复的dump.rdb拷贝指定目录
+    4. 启动redis服务
+    5. 通过redis命令行动态配置临时开启AOF，使用CONFIG SET appendonly yes
+    6. 一旦redis重启，状态将以配置文件为准，所以要将配置文件中的appendonly改为yes
 
 #### RDB自动间隔性保存
 Redis通过设置服务器配置的save选项，让服务器每隔一段时间自动执行一次BGSAVE命令。
@@ -1670,3 +1680,4 @@ Redis决定将AOF重写程序放到子进程里执行，子进程进行AOF重写
     2）对新的AOF文件进行改名，原子地（atomic）覆盖现有的AOF文件，完成新旧两个AOF文件的替换。
 
 <span style="color: red;font-weight: bold;">Tips</span>：在整个AOF后台重写过程中，只有信号处理函数执行时会对服务器进程（父进程）造成阻塞，在其他时候，AOF后台重写都不会阻塞父进程，这将AOF重写对服务器性能造成的影响降到了最低。
+

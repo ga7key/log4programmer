@@ -11,9 +11,9 @@
 **ASCII 打印字符 (字符编码: 32-126)**  
 32～126(共95个)是字符：32是空格，其中48～57为0到9十个阿拉伯数字，65～90为26个大写英文字母，97～122号为26个小写英文字母，其余为一些标点符号、运算符号等。
 
-![ascii table](../images/characterEncoding/asciitable.gif)
+![ascii table](../images/others/asciitable.gif)
 
 **ASCII扩展码 (字符编码: 128-255)**
 后128个称为扩展ASCII码。许多基于x86的系统都支持使用扩展（或“高”）ASCII。扩展ASCII码允许将每个字符的第8位用于确定附加的128个特殊符号字符、外来语字母和图形符号。
 
-![ascii extended](../images/characterEncoding/asciiextended.gif)
+![ascii extended](../images/others/asciiextended.gif)

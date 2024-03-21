@@ -1,3 +1,4 @@
 * [Redis命令](redis/redis_command.md)
 * [Redis](redis/redis.md)
+* [多机Redis](redis/redis_multiple.md)
 * [Redis新特性](redis/redis_new_feature.md)

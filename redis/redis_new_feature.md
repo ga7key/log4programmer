@@ -12,7 +12,7 @@
 主要区别就在于，不同flags类型的数据结构中的len和alloc成员变量的数据类型不同。  
 比如 sdshdr16 和 sdshdr32 这两个类型，它们的定义分别如下：
 
-```
+```c
 struct _attribute_((_packed_)) sdshdr16 {
     uint16_t len;
     uint16_t alloc;
@@ -41,7 +41,7 @@ Redis 在编程上还使用了专门的编译优化来节省内存空间，即�
 ![quicklist](../images/redis_new_feature/2024-02-28_quicklist.png)
 
 **quicklist**的结构定义：
-```
+```c
 typedef struct quicklist {
     //表头指针
     quicklistNode *head;
@@ -56,7 +56,7 @@ typedef struct quicklist {
 ```
 
 **quicklistNode**的结构定义：
-```
+```c
 typedef struct quicklistNode {
     //前置节点
     struct quicklistNode *prev;

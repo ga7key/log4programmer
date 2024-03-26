@@ -11,7 +11,7 @@ SDS还被用作缓冲区（buffer）：AOF模块中的AOF缓冲区，以及客�
 
 每个**sds.h/sdshdr**结构表示一个SDS值：
 
-```
+```c
 struct sdshdr {
     //记录buf 数组中已使用字节的数量，等于SDS 所保存字符串的长度
     int len;
@@ -38,7 +38,7 @@ SDS在len属性中记录了字符数组的长度，所以获取一个SDS长度�
 
 ##### Ⅱ.杜绝缓冲区溢出
 C字符串不记录自身长度带来的另一个问题是容易造成缓冲区溢出（buffer overflow）。举个例子，<string.h>/strcat函数可以将src字符串中的内容拼接到dest字符串的末尾：  
-```
+```c
 char *strcat(char *dest, const char *src);
 ```
 在执行strcat函数前，如果没有为dest分配足够的空间去容纳src字符串的内容，就会覆盖掉相邻内存的内容，这就产生了缓冲区溢出。
@@ -130,7 +130,7 @@ sdscmp | 对比两个SDS字符串是否相同 | O(N)，N为两个SDS中较短的
 当一个列表对象包含了数量比较多的元素，又或者列表中包含的元素都是比较长的字符串时，Redis就会使用链表作为列表对象的底层实现。  
 发布与订阅、慢查询、监视器等功能也用到了链表，Redis服务器本身还使用链表来保存多个客户端的状态信息，以及使用链表来构建客户端输出缓冲区（output buffer）。
 
-```
+```bash
 redis> LLEN integers
 (integer) 1024
 redis> LRANGE integers 0 2
@@ -142,7 +142,7 @@ redis> LRANGE integers 0 2
 integers列表对象的底层实现就是一个链表，链表中的每个节点都保存了一个整数值。
 
 每个链表节点使用一个**adlist.h/listNode**结构来表示：  
-```
+```c
 typedef struct listNode {
     //前置节点
     struct listNode * prev;
@@ -157,7 +157,7 @@ typedef struct listNode {
 ![double-ended_listNode](../images/redis/2024-02-17_双端链表.png ':size=50%')
 
 用**adlist.h/list**来持有链表：  
-```
+```c
 typedef struct list {
     //表头指针
     listNode * head;
@@ -217,12 +217,12 @@ listRelease | 释放给定链表，以及链表中的所有节点 | O(N)，N为�
 在字典中，一个键（key）可以和一个值（value）进行关联（或者说将键映射为值），这些关联的键和值就称为键值对。
 
 Redis的数据库、哈希对象等都是基于字典实现的。
-```
+```bash
 redis> SET msg "hello world"
 ```
 在数据库中创建一个键为"msg"，值为"hello world"的键值对时，这个键值对就是保存在代表数据库的字典里面的。
 
-```
+```bash
 redis> HLEN website
 (integer) 10086
 redis> HGETALL website
@@ -238,7 +238,7 @@ Redis的字典结构图：
 ![dict_structure](../images/redis/2024-02-18_dict_structure.png ':size=50%')
 
 **哈希表节点**使用dictEntry结构定义，每个dictEntry结构都保存着一个键值对：  
-```
+```c
 typedef struct dictEntry {
     //键
     void *key;
@@ -254,7 +254,7 @@ typedef struct dictEntry {
 ```
 
 **哈希表**由dict.h/dictht结构定义：  
-```
+```c
 typedef struct dictht {
     //哈希表数组
     dictEntry **table;
@@ -268,7 +268,7 @@ typedef struct dictht {
 ```
 
 **字典**由dict.h/dict结构定义：  
-```
+```c
 typedef struct dict {
     //类型特定函数
     dictType *type;
@@ -287,7 +287,7 @@ typedef struct dict {
 > - ht属性是一个包含两个项的数组，数组中的每项都是一个dictht哈希表，一般情况，字典只使用ht[0]哈希表，ht[1]哈希表只会在进行rehash时使用。
 > - rehashidx用来记录rehash目前的进度，如果目前没有在进行rehash，那么它的值为-1。
 
-```
+```c
 typedef struct dictType {
     //计算哈希值的函数
     unsigned int (*hashFunction)(const void *key);
@@ -313,7 +313,7 @@ typedef struct dictType {
     index = hash & dict->ht[x].sizemask;
 
 举例，如果将一个键值对k0和v0添加到字典里：  
-```
+```text
 //计算键k0的哈希值，假设计算得出的哈希值为8
 hash = dict->type->hashFunction(k0);
 //根据hash=8计算出键k0的索引值0
@@ -351,7 +351,7 @@ Redis的哈希表使用链地址法（separate chaining）来解决键冲突，�
 **哈希表的收缩条件**：
 - 当哈希表的负载因子小于0.1时，程序自动开始对哈希表执行收缩操作
 
-```
+```text
 #负载因子 = 哈希表已保存节点数量 / 哈希表大小
 load_factor = ht[0].used / ht[0].size
 ```
@@ -395,7 +395,7 @@ Redis只在两个地方用到了跳跃表，一个是实现有序集合对象，
 
 fruit-price有序集合的130个数据都保存在一个跳跃表里，其中每个跳跃表节点（node）都保存了一款水果的名称和价钱，所有水果按价钱从低到高在跳跃表里面排序。  
 例如，跳跃表的第一个元素的成员为"banana"，它的分值为5。
-```
+```bash
 redis> ZCARD fruit-price
 (integer)130
 redis> ZRANGE fruit-price 0 2 WITHSCORES
@@ -415,7 +415,7 @@ redis> ZRANGE fruit-price 0 2 WITHSCORES
 <span style="color: red;font-weight: bold;">Tips</span>：注意表头节点和其他节点的构造是一样的：表头节点也有后退指针、分值和成员对象，不过表头节点的这些属性都不会被用到，所以图中省略了这些部分，只显示了表头节点的各个层。
 
 **redis.h/zskiplist**结构的定义：  
-```
+```c
 typedef struct zskiplist {
     //表头节点和表尾节点
     structz skiplistNode *header, *tail;
@@ -431,7 +431,7 @@ typedef struct zskiplist {
 > - level属性则用于在O(1)复杂度内获取跳跃表中层高最大的那个节点的层数量，注意表头节点的层高并不计算在内
 
 **redis.h/zskiplistNode**结构的定义：  
-```
+```c
 typedef struct zskiplistNode {
     //层
     struct zskiplistLevel {
@@ -484,7 +484,7 @@ zslDeleteRangeByRank | 给定一个排位范围，删除跳跃表中所有在这
 
 ### 整数集合
 intset，当一个集合只包含整数值元素，并且这个集合的元素数量不多时，Redis就会使用整数集合作为集合对象的底层实现。例如：
-```
+```bash
 redis> SADD numbers 1 3 5 7 9
 (integer) 5
 redis> OBJECT ENCODING numbers
@@ -494,7 +494,7 @@ redis> OBJECT ENCODING numbers
 整数集合（intset）可以保存类型为int16_t、int32_t、int64_t的整数值，并且保证集合有序，其中不会出现重复元素。
 
 **intset.h/intset**结构定义：  
-```
+```c
 typedef struct intset {
     //编码方式
     uint32_t encoding;
@@ -566,7 +566,7 @@ intsetBlobLen | 返回整数集合占用的内存字节数 | O(1)
 压缩列表（ziplist）是列表对象和哈希对象的底层实现之一。
 
 当一个列表对象只包含少量列表项，并且每个列表项要么就是小整数值，要么就是长度比较短的字符串，那么Redis就会使用压缩列表来做列表键的底层实现。  
-```
+```bash
 redis> RPUSH lst 1 3 5 10086 "hello" "world"
 (integer)6
 redis> OBJECT ENCODING lst
@@ -574,7 +574,7 @@ redis> OBJECT ENCODING lst
 ```
 
 当一个哈希对象只包含少量键值对，并且每个键值对的键和值要么就是小整数值，要么就是长度比较短的字符串，那么Redis就会使用压缩列表来做哈希对象的底层实现。  
-```
+```bash
 redis> HMSET profile "name" "Jack" "age" 28 "job" "Programmer"
 OK
 redis> OBJECT ENCODING profile
@@ -713,7 +713,7 @@ Redis的对象带有访问时间记录信息，该信息可以用于计算数据
 在Redis的数据库中新创建一个键值对时，我们至少会创建两个对象，一个对象用作键值对的键（键对象），另一个对象用作键值对的值（值对象）。
 
 Redis中的每个对象都由一个redisObject结构表示：
-```
+```c
 typedef struct redisObject {
     //类型
     unsigned type:4;
@@ -737,7 +737,7 @@ REDIS_ZSET | 有序集合对象 | zset
 对于Redis数据库保存的键值对来说，键总是一个字符串对象，而值则可以是字符串对象、列表对象、哈希对象、集合对象或者有序集合对象的其中一种。
 
 执行TYPE命令时，返回的结果为数据库键对应的值对象的类型：
-```
+```bash
 redis> TYPE msg
 string
 redis> TYPE profile
@@ -759,7 +759,7 @@ REDIS_ENCODING_INTSET | 整数集合 | intset
 REDIS_ENCODING_SKIPLIST | 跳跃表和字典 | skiplist
 
 使用OBJECT ENCODING命令可以查看一个数据库键的值对象的编码：
-```
+```bash
 redis> OBJECT ENCODING msg
 "embstr"
 redis> OBJECT ENCODING numbers
@@ -916,7 +916,7 @@ ziplist编码的有序集合对象使用压缩列表作为底层实现，每个�
 
 skiplist编码的有序集合对象使用zset结构作为底层实现，一个zset结构同时包含一个字典和一个跳跃表：
 
-```
+```c
 typedef struct zset {
     zskiplist *zsl;
     dict *dict;
@@ -989,7 +989,7 @@ DEL、EXPIRE、TYPE等命令也可以称为多态命令，因为无论输入的�
 因为C语言并不具备自动内存回收功能，所以Redis在自己的对象系统中构建了一个引用计数（reference counting）技术实现的内存回收机制，通过这一机制，程序可以通过跟踪对象的引用计数信息，在适当的时候自动释放对象并进行内存回收。  
 每个对象的引用计数信息由redisObject结构的refcount属性记录：
 
-```
+```c
 typedef struct redisObject {
     // ...
     //引用计数
@@ -1031,7 +1031,7 @@ resetRefCount | 将对象的引用计数值设置为0，但不释放对象，通
 <span style="color: red;font-weight: bold;">Tips</span>：创建共享字符串对象的数量可以通过修改redis.h/REDIS_SHARED_INTEGERS常量来修改。
 
 举例，创建两个值为100的键，并使用OBJECT REFCOUNT命令查看键的值对象的引用计数：  
-```
+```bash
 redis> SET A 100
 OK
 redis> OBJECT REFCOUNT A
@@ -1060,7 +1060,7 @@ redis> OBJECT REFCOUNT B
 
 ### 对象的空转时长
 redisObject结构包含的lru属性，记录了对象最后一次被命令程序访问的时间。
-```
+```c
 typedef struct redisObject {
     // ...
     unsigned lru:22;
@@ -1069,7 +1069,7 @@ typedef struct redisObject {
 ```
 
 OBJECT IDLETIME命令可以打印出给定键的空转时长，空转时长就是通过将当前时间减去键的值对象的lru时间计算得出的。
-```
+```bash
 redis> SET msg "hello world"
 OK
 #等待一段时间
@@ -1090,7 +1090,7 @@ redis> OBJECT IDLETIME msg
 
 ## 数据库
 Redis服务器将所有数据库都保存在服务器状态redis.h/redisServer结构的db数组中，db数组的每个项都是一个redis.h/redisDb结构，每个redisDb结构代表一个数据库：  
-```
+```c
 struct redisServer {
     // ...
     // 一个数组，保存着服务器中的所有数据库
@@ -1102,7 +1102,7 @@ struct redisServer {
 ```
 
 在服务器内部，客户端状态redisClient结构的db属性记录了客户端当前的目标数据库，这个属性是一个指向redisDb结构的指针：  
-```
+```c
 typedef struct redisClient {
     // ...
     // 记录客户端当前正在使用的数据库
@@ -1123,7 +1123,7 @@ typedef struct redisClient {
 
 ### 键空间
 Redis服务器中的每个数据库都由一个redis.h/redisDb结构表示，其中，redisDb结构的dict字典保存了数据库中的所有键值对，我们将这个字典称为键空间（key space）：  
-```
+```c
 typedef struct redisDb {
     // ...
     //数据库键空间，保存着数据库中的所有键值对
@@ -1150,7 +1150,7 @@ typedef struct redisDb {
 ### 生存时间和过期时间
 #### EXPIRE、PEXPIRE
 通过EXPIRE命令或者PEXPIRE命令，客户端可以以秒或者毫秒精度为数据库中的某个键设置**生存时间（Time To Live，TTL）**，在经过指定的生存时间之后，服务器就会自动删除生存时间为0的键。  
-```
+```bash
 redis> SET key value
 OK
 redis> EXPIRE key 5
@@ -1165,7 +1165,7 @@ redis> GET key    //5秒之后
 
 #### EXPIREAT、PEXPIREAT
 客户端可以通过EXPIREAT命令或PEXPIREAT命令，以秒或者毫秒精度给数据库中的某个键设置**过期时间（expire time）**，过期时间是一个UNIX时间戳，当键的过期时间来临时，服务器就会自动从数据库中删除这个键。  
-```
+```bash
 redis> SET key value
 OK
 redis> EXPIREAT key 1377257300
@@ -1184,7 +1184,7 @@ redis> GET key    //1377257300之后
 
 #### TTL、PTTL
 TTL命令和PTTL命令接受一个带有生存时间或者过期时间的键，返回这个键的剩余生存时间，也就是返回距离这个键被服务器自动删除还有多长时间。  
-```
+```bash
 redis> SET key value
 OK
 redis> EXPIRE key 1000
@@ -1221,7 +1221,7 @@ redisDb结构的expires字典保存了数据库中所有键的过期时间，我
 
 #### 移除过期时间
 PERSIST命令可以移除一个键的过期时间：  
-```
+```bash
 redis> PERSIST message
 (integer) 1
 redis> TTL message
@@ -1301,7 +1301,7 @@ Redis服务器使用的是惰性删除加定期删除两种策略：通过配合
 2. 关注“某个命令被什么键执行了”的通知称为键事件通知（key-event notification）
 
 以下是一个键空间通知的例子，代码展示了客户端如何获取0号数据库中针对message键执行的所有命令：  
-```
+```bash
 127.0.0.1:6379> SUBSCRIBE _ _keyspace@0_ _:message
 Reading messages... (press Ctrl-C to quit)
 1) "subscribe"  // 订阅信息
@@ -1319,7 +1319,7 @@ Reading messages... (press Ctrl-C to quit)
 ```
 
 以下是一个键事件通知的例子，代码展示了客户端如何获取0号数据库中所有执行DEL命令的键：
-```
+```bash
 127.0.0.1:6379> SUBSCRIBE _ _keyevent@0_ _:del
 Reading messages... (press Ctrl-C to quit)
 1) "subscribe"  // 订阅信息
@@ -1347,7 +1347,7 @@ Reading messages... (press Ctrl-C to quit)
 
 ##### 发送通知
 发送数据库通知的功能是由notify.c/notifyKeyspaceEvent函数实现的：
-```
+```c
 void notifyKeyspaceEvent(int type,char *event,robj *key,int dbid);
 ```
 
@@ -1403,7 +1403,7 @@ RDB文件的载入工作是在服务器启动时自动执行的，所以Redis并
 Redis通过设置服务器配置的save选项，让服务器每隔一段时间自动执行一次BGSAVE命令。
 
 用户可以通过指定配置文件或者传入启动参数的方式设置save选项，以下是服务器为save选项设置的默认条件：
-```
+```text
 save 900 1
 save 300 10
 save 60 10000
@@ -1414,7 +1414,7 @@ save 60 10000
 > - 服务器在60秒之内，对数据库进行了至少10000次修改。
 
 当Redis服务器启动时，会根据save选项的保存条件，设置服务器状态redisServer结构的saveparams属性。
-```
+```c
 struct redisServer {
     // ...
     //记录了保存条件的数组
@@ -1578,7 +1578,7 @@ TYPE的值为REDIS_RDB_TYPE_LIST_ZIPLIST、REDIS_RDB_TYPE_HASH_ZIPLIST或者REDI
 > - 一个字节的EOF常量。
 > - 八个字节的校验和（check_sum）。
 
-```
+```bash
 $ od -c dump.rdb
 0000000   R   E  D   I   S   0   0   0  6 376 \0 374  \  2 365 336
 0000020   @ 001 \0  \0  \0 003   M   S  G 005  H   E  L  L   O 377
@@ -1606,7 +1606,7 @@ AOF持久化功能的实现可以分为命令追加（append）、文件写入�
 ###### 命令追加
 当AOF持久化功能处于打开状态时，服务器在执行完一个写命令之后，会以协议格式将被执行的写命令追加到服务器状态的aof_buf缓冲区的末尾。
 
-```
+```c
 struct redisServer {
     // ...
     // AOF缓冲区
@@ -1709,7 +1709,7 @@ Redis的I/O多路复用程序的所有功能都是通过包装常见的select、
 
 Redis在I/O多路复用程序的实现源码中用#include宏定义了相应的规则，程序会在编译时自动选择系统中性能最高的I/O多路复用函数库来作为Redis的I/O多路复用程序的底层实现。
 
-```
+```c
 /* Include the best multiplexing layer supported by this system.
  * The following should be ordered by performances, descending. */
 # ifdef HAVE_EVPORT
@@ -1852,7 +1852,7 @@ Redis服务器是典型的一对多服务器程序：一个服务器可以与多
     客户端的身份验证标志。
     客户端的创建时间，客户端和服务器最后一次通信的时间，以及客户端的输出缓冲区大小超出软性限制（soft limit）的时间。
 
-```
+```c
 struct redisServer {
     // ...
     //一个链表，保存了所有客户端状态
@@ -1870,7 +1870,7 @@ struct redisServer {
     另外一类是和特定功能相关的属性，比如操作数据库时需要用到的db属性和dictid属性，执行事务时需要用到的mstate属性，以及执行WATCH命令时需要用到的watched_keys属性等等。
 
 客户端的结构：
-```
+```c
 typedef struct redisClient {
     // ...
     //套接字描述符
@@ -1912,7 +1912,7 @@ typedef struct redisClient {
 
 执行CLIENT list命令可以列出目前所有连接到服务器的普通客户端，命令输出中的fd域显示了服务器连接客户端所使用的套接字描述符：
 
-```
+```bash
 redis> CLIENT list
 addr=127.0.0.1:53428 fd=6 name= age=1242 idle=0 ...
 addr=127.0.0.1:53469 fd=7 name= age=4 idle=4 ...
@@ -1922,7 +1922,7 @@ addr=127.0.0.1:53469 fd=7 name= age=4 idle=4 ...
 在默认情况下，一个连接到服务器的客户端是没有名字的。  
 使用CLIENT setname命令可以为客户端设置一个名字，让客户端的身份变得更清晰。
 
-```
+```bash
 redis> CLIENT list
 addr=127.0.0.1:53428 fd=6 name=message_queue age=2093 idle=0 ...
 addr=127.0.0.1:53469 fd=7 name=user_relationship age=855 idle=2 ...
@@ -1932,7 +1932,7 @@ addr=127.0.0.1:53469 fd=7 name=user_relationship age=855 idle=2 ...
 客户端的标志属性flags记录了客户端的角色（role），以及客户端目前所处的状态。  
 flags属性的值可以是单个标志；也可以是多个标志，用二进制或连接：
 
-```
+```text
 flags = <flag>
 flags = <flag1> | <flag2> | ...
 ```
@@ -1962,7 +1962,7 @@ flags = <flag1> | <flag2> | ...
 
 以下是一些flags属性的例子：
 
-```
+```bash
 #客户端是一个主服务器
 REDIS_MASTER
 #客户端正在被列表命令阻塞
@@ -2011,7 +2011,7 @@ authenticated属性仅在服务器启用了身份验证功能时使用。如果�
 ###### 时间
 - ctime属性记录了创建客户端的时间，这个时间可以用来计算客户端与服务器已经连接了多少秒，CLIENT list命令的age域记录了这个秒数。
 
-```
+```bash
 redis> CLIENT list
 addr=127.0.0.1:53428 ... age=1242 idle=12 ...
 ```
@@ -2041,7 +2041,7 @@ lastinteraction属性可以用来计算客户端的空转（idle）时间，也�
 
 使用client-output-buffer-limit选项可以为普通客户端、从服务器客户端、执行发布与订阅功能的客户端分别设置不同的软性限制和硬性限制，该选项的格式为：
 
-```
+```bash
 client-output-buffer-limit <class> <hard limit> <soft limit> <soft seconds>
 //使用示例
 //将普通客户端的硬性限制和软性限制都设置为0，表示不限制客户端的输出缓冲区大小。
@@ -2056,7 +2056,7 @@ client-output-buffer-limit pubsub 32mb 8mb 60
 
 服务器会在初始化时创建负责执行Lua脚本中包含的Redis命令的伪客户端，并将这个伪客户端关联在服务器状态结构的lua_client属性中。
 
-```
+```c
 struct redisServer {
     // ...
     redisClient *lua_client;
@@ -2165,7 +2165,7 @@ M | 这个命令在监视器(monitor)模式下不会自动被传播(propagate) |
 Redis服务器中的serverCron函数默认每隔100毫秒执行一次，这个函数负责管理服务器的资源，并保持服务器自身的良好运转。
 
 redisServer结构（服务器状态）中和serverCron函数有关的属性：  
-```
+```c
 struct redisServer {
     // ...
     // 保存了秒级精度的系统当前UNIX时间戳
@@ -2211,7 +2211,7 @@ Redis服务器中有不少功能需要获取系统的当前时间，而每次获
 
 服务器状态中的lruclock属性保存了服务器的LRU时钟。  
 每个Redis对象都会有一个lru属性，这个lru属性保存了对象最后一次被命令访问的时间：  
-```
+```c
 typedef struct redisObject {
     // ...
     unsigned lru:22;
@@ -2222,7 +2222,7 @@ typedef struct redisObject {
 当服务器要计算一个数据库键的空转时间（也即是数据库键对应的值对象的空转时间），程序会用服务器的lruclock属性记录的时间减去对象的lru属性记录的时间，得出的计算结果就是这个对象的空转时间。  
 serverCron函数默认会以每10秒一次的频率更新lruclock属性的值，因为这个时钟不是实时的，所以根据这个属性计算出来的LRU时间实际上只是一个模糊的估算值。  
 lruclock时钟的当前值可以通过INFO server命令的lru_clock域查看：  
-```
+```bash
 redis> INFO server
 # Server
 ...
@@ -2233,7 +2233,7 @@ lru_clock:55923
 3. **更新服务器每秒执行命令次数**
 
 serverCron函数中的trackOperationsPerSecond函数会以每100毫秒一次的频率执行，这个函数的功能是以抽样计算的方式，估算并记录服务器在最近一秒钟处理的命令请求数量，这个值可以通过INFO status命令的instantaneous_ops_per_sec域查看：  
-```
+```bash
 redis> INFO stats
 # Stats
 ...
@@ -2254,7 +2254,7 @@ trackOperationsPerSecond函数每次运行，都会根据ops_sec_last_sample_tim
 
 每次serverCron函数执行时，程序都会查看服务器当前使用的内存数量，并与stat_peak_memory保存的数值进行比较，如果当前使用的内存数量比stat_peak_memory属性记录的值要大，那么程序就将当前使用的内存数量记录到stat_peak_memory属性里面。  
 INFO memory命令的used_memory_peak和used_memory_peak_human两个域分别以两种格式记录了服务器的内存峰值：  
-```
+```bash
 redis> INFO memory
 # Memory
 ...
@@ -2265,7 +2265,7 @@ used_memory_peak_human:490.06K
 
 5. **处理SIGTERM信号**
 在启动服务器时，Redis会为服务器进程的SIGTERM信号关联处理器sigtermHandler函数，这个信号处理器负责在服务器接到SIGTERM信号时，打开服务器状态的shutdown_asap标识：  
-```
+```c
 // SIGTERM信号的处理器
 static void sigtermHandler(int sig) {
     // 打印日志
@@ -2278,7 +2278,7 @@ static void sigtermHandler(int sig) {
 每次serverCron函数运行时，程序都会对服务器状态的shutdown_asap属性进行检查，并根据属性的值决定是否关闭服务器。
 
 以下代码展示了服务器在接到SIGTERM信号之后，关闭服务器并打印相关日志的过程：  
-```
+```bash
 [6794 | signal handler] (1384435690) Received SIGTERM, scheduling shutdown...
 [6794] 14 Nov 21:28:10.108 # User requested shutdown...
 [6794] 14 Nov 21:28:10.108 * Saving the final RDB snapshot before exiting.
@@ -2356,7 +2356,7 @@ initServerConfig函数设置的服务器状态属性基本都是一些整数、�
 
 在启动服务器时，用户可以通过给定配置参数或者指定配置文件来修改服务器的默认配置。
 
-```
+```bash
 //修改服务器的运行端口号
 $ redis-server --port 10086
 //指定配置文件修改配置项
@@ -2402,13 +2402,13 @@ $ redis-server redis.conf
     ▶ 如果服务器没有启用AOF持久化功能，那么服务器使用RDB文件来还原数据库状态。
 
 当服务器完成数据库状态还原工作之后，服务器将在日志中打印出载入文件并还原数据库状态所耗费的时长：  
-```
+```bash
 [5244] 21 Nov 22:43:49.084 * DB loaded from disk: 0.068 seconds
 ```
 
 5. **执行事件循环**
 
 在初始化的最后一步，服务器将打印出以下日志，并开始执行服务器的事件循环（loop）。  
-```
+```bash
 [5244] 21 Nov 22:43:49.084 * The server is now ready to accept connections on port 6379
 ```

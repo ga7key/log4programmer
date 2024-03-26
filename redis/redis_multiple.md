@@ -5,7 +5,7 @@
 
 假设现在有两个Redis服务器，地址分别为127.0.0.1:6379和127.0.0.1:12345，向服务器127.0.0.1:12345发送以下命令：
 
-```
+```bash
 127.0.0.1:12345> SLAVEOF 127.0.0.1 6379
 OK
 ```
@@ -129,18 +129,18 @@ PSYNC命令执行完整重同步或部分重同步的流程图：
 ### 复制的实现
 向从服务器发送SLAVEOF命令，可以让一个从服务器去复制一个主服务器：
 
-```
+```bash
 SLAVEOF <master_ip> <master_port>
 ```
 
 ###### 1.设置主服务器的地址和端口
 当客户端向从服务器发送以下命令时：
-```
+```bash
 127.0.0.1:12345> SLAVEOF 127.0.0.1 6379
 OK
 ```
 从服务器首先要做的就是将客户端给定的主服务器IP地址127.0.0.1以及端口6379保存到服务器状态的masterhost属性和masterport属性里面：
-```
+```c
 struct redisServer {
     // ...
     // 主服务器的地址
@@ -188,7 +188,7 @@ PING命令有两个作用：
 
 例如，从服务器的监听端口为12345，那么从服务器将向主服务器发送命令 REPLCONF listening-port 12345  
 主服务器在接收到这个命令之后，会将端口号记录在从服务器所对应的客户端状态的slave_listening_port属性中：
-```
+```c
 typedef struct redisClient {
     // ...
     // 从服务器的监听端口号
@@ -199,7 +199,7 @@ typedef struct redisClient {
 slave_listening_port属性目前唯一的作用就是在主服务器执行INFO replication命令时打印出从服务器的端口号。
 
 以下是客户端向例子中的主服务器发送INFO replication命令时得到的回复，其中slave0行的port域显示的就是从服务器所对应客户端状态的slave_listening_port属性的值：
-```
+```bash
 127.0.0.1:6379> INFO replication
 # Replication
 role:master
@@ -227,7 +227,7 @@ repl_backlog_histlen:1288
 
 ### 心跳检测
 在命令传播阶段，从服务器默认会以每秒一次的频率，向主服务器发送命令：
-```
+```bash
 REPLCONF ACK <replication_offset>
 ```
 其中replication_offset是从服务器当前的复制偏移量。
@@ -241,7 +241,7 @@ REPLCONF ACK <replication_offset>
 #### 检测主从服务器的网络连接状态
 主从服务器可以通过发送和接收REPLCONF ACK命令来检查两者之间的网络连接是否正常：如果主服务器超过一秒钟没有收到从服务器发来的REPLCONF ACK命令，那么主服务器就知道主从服务器之间的连接出现问题了。  
 通过向主服务器发送INFO replication命令，在列出的从服务器列表的lag一栏中，可以看到相应从服务器最后一次向主服务器发送REPLCONF ACK命令距离现在过了多少秒：
-```
+```bash
 127.0.0.1:6379> INFO replication
 # Replication
 role:master
@@ -261,7 +261,7 @@ repl_backlog_histlen:210
 Redis的min-slaves-to-write和min-slaves-max-lag两个选项可以防止主服务器在不安全的情况下执行写命令。
 
 如果向主服务器提供以下设置：
-```
+```text
 min-slaves-to-write 3
 min-slaves-max-lag 10
 ```
@@ -287,7 +287,7 @@ Sentinel（哨岗、哨兵）是Redis的高可用性（high availability）解�
 
 ### 启动并初始化Sentinel
 启动一个Sentinel可以使用如下两个命令，效果完全相同。
-```
+```bash
 $ redis-sentinel /path/to/your/sentinel.conf
 $ redis-server /path/to/your/sentinel.conf --sentinel
 ```
@@ -322,12 +322,12 @@ AOF持久化命令，比如BGREWRITEAOF | 不使用
 ###### 2.使用Sentinel专用代码
 启动Sentinel的第二个步骤就是将一部分普通Redis服务器使用的代码替换成Sentinel专用代码。  
 比如说，普通Redis服务器使用redis.h/REDIS_SERVERPORT常量的值作为服务器端口，而Sentinel则使用sentinel.c/REDIS_SENTINEL_PORT常量的值作为服务器端口：
-```
+```bash
 #define REDIS_SENTINEL_PORT 26379
 ```
 
 普通Redis服务器使用redis.c/redisCommandTable作为服务器的命令表：
-```
+```c
 struct redisCommand redisCommandTable[] = {
     {"get",getCommand,2,"r",0,NULL,1,1,1,0,0},
     {"set",setCommand,-3,"wm",0,noPreloadGetKeys,1,1,1,0,0},
@@ -341,7 +341,7 @@ struct redisCommand redisCommandTable[] = {
 ```
 
 而Sentinel则使用sentinel.c/sentinelcmds作为服务器的命令表，并且其中的INFO命令会使用Sentinel模式下的专用实现sentinel.c/sentinelInfoCommand函数，而不是普通Redis服务器使用的实现redis.c/infoCommand函数：
-```
+```c
 struct redisCommand sentinelcmds[] = {
     {"ping",pingCommand,1,"",0,NULL,0,0,0,0,0},
     {"sentinel",sentinelCommand,-2,"",0,NULL,0,0,0,0,0},
@@ -356,7 +356,7 @@ sentinelcmds命令表也解释了为什么在Sentinel模式下，Redis服务器�
 
 ###### 3.初始化Sentinel状态
 服务器会初始化一个sentinel.c/sentinelState结构（后面简称“Sentinel状态”），这个结构保存了服务器中所有和Sentinel功能有关的状态（服务器的一般状态仍然由redis.h/redisServer结构保存）：
-```
+```c
 struct sentinelState {
     // 当前纪元，用于实现故障转移
     uint64_t current_epoch;
@@ -385,7 +385,7 @@ Sentinel状态中的masters字典记录了所有被Sentinel监视的主服务器
 每个sentinelRedisInstance结构（后面简称“实例结构”）代表一个被Sentinel监视的Redis服务器实例（instance），这个实例可以是主服务器、从服务器，或者另外一个Sentinel。
 
 实例结构在表示主服务器时的部分属性如下：
-```
+```c
 typedef struct sentinelRedisInstance {
     // 标识值，记录了实例的类型，以及该实例的当前状态
     int flags;
@@ -415,7 +415,7 @@ typedef struct sentinelRedisInstance {
 } sentinelRedisInstance;
 ```
 sentinelRedisInstance.addr属性是一个指向sentinel.c/sentinelAddr结构的指针，这个结构保存着实例的IP地址和端口号：
-```
+```c
 typedef struct sentinelAddr {
     char *ip;
     int port;
@@ -439,7 +439,7 @@ typedef struct sentinelAddr {
 Sentinel默认会以每十秒一次的频率，通过命令连接向被监视的主服务器发送INFO命令，并通过分析INFO命令的回复来获取主服务器的当前信息。
 
 假设主服务器master有三个从服务器slave0、slave1和slave2，并且一个Sentinel正在连接主服务器，那么Sentinel将持续地向主服务器发送INFO命令，并获得类似于以下内容的回复：
-```
+```bash
 # Server
 ...
 run_id:7611c59dc3a29aa6fa0609f841bb6a1019008a9c
@@ -474,7 +474,7 @@ Sentinel在分析INFO命令中包含的从服务器信息时，会检查从服�
 #### 获取从服务器信息
 当Sentinel发现主服务器有新的从服务器出现时，Sentinel除了会为这个新的从服务器创建相应的实例结构之外，Sentinel还会创建连接到从服务器的命令连接和订阅连接。  
 在创建命令连接之后，Sentinel在默认情况下，会以每十秒一次的频率通过命令连接向从服务器发送INFO命令，并获得类似于以下内容的回复：
-```
+```bash
 # Server
 ...
 run_id:32be0699dd27b410f7c90dada3a6fab17f97899f
@@ -501,7 +501,7 @@ slave_priority:100
 
 #### 向主服务器和从服务器发送信息
 在默认情况下，Sentinel会以每两秒一次的频率，通过命令连接向所有被监视的主服务器和从服务器发送以下格式的命令：
-```
+```bash
 PUBLISH __sentinel__:hello "<s_ip>,<s_port>,<s_runid>,<s_epoch>,<m_name>,<m_ip>,<m_port>,<m_epoch>"
 ```
 这条命令向服务器的\__sentinel__:hello频道发送了一条信息，信息的内容由多个参数组成：  
@@ -521,7 +521,7 @@ m_epoch | 主服务当前的配置纪元
 
 #### 接收来自主服务器和从服务器的频道信息
 当Sentinel与一个主服务器或者从服务器建立起订阅连接之后，Sentinel就会通过订阅连接，向服务器发送以下命令：
-```
+```bash
 SUBSCRIBE __sentinel__:hello
 ```
 
@@ -565,7 +565,7 @@ Sentinel配置文件中的down-after-milliseconds选项指定了Sentinel判断�
 
 ###### 主观下线时长选项的作用范围
 用户设置的down-after-milliseconds选项的值，不仅会被Sentinel用来判断主服务器的主观下线状态，还会被用于判断主服务器属下的所有从服务器，以及所有同样监视这个主服务器的其他Sentinel的主观下线状态。举个例子，如果用户向Sentinel设置了以下配置：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 2
 sentinel down-after-milliseconds master 50000
 ```
@@ -573,12 +573,12 @@ sentinel down-after-milliseconds master 50000
 
 ###### 多个Sentinel设置的主观下线时长可能不同
 down-after-milliseconds选项另一个需要注意的地方是，对于监视同一个主服务器的多个Sentinel来说，这些Sentinel所设置的down-after-milliseconds选项的值也可能不同，因此，当一个Sentinel将主服务器判断为主观下线时，其他Sentinel可能仍然会认为主服务器处于在线状态。举个例子，如果Sentinel1载入了以下配置：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 2
 sentinel down-after-milliseconds master 50000
 ```
 而Sentinel2则载入了以下配置：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 2
 sentinel down-after-milliseconds master 10000
 ```
@@ -588,7 +588,7 @@ sentinel down-after-milliseconds master 10000
 当Sentinel将一个主服务器判断为主观下线之后，为了确认这个主服务器是否真的下线了，它会向同样监视这一主服务器的其他Sentinel进行询问，看它们是否也认为主服务器已经进入了下线状态（可以是主观下线或者客观下线）。当Sentinel从其他Sentinel那里接收到足够数量的已下线判断之后，Sentinel就会将从服务器判定为客观下线，并对主服务器执行故障转移操作。
 
 1. Sentinel使用如下命令询问其他Sentinel是否同意主服务器已下线：
-```
+```bash
 SENTINEL is-master-down-by-addr <ip> <port> <current_epoch> <runid>
 ```
 
@@ -601,7 +601,7 @@ runid | 可以是 * 符号或者Sentinel的运行ID：* 符号代表命令用于
 
 2. 当一个Sentinel（目标Sentinel）接收到另一个Sentinel（源Sentinel）发来的SENTINEL is-master-down-by命令时，目标Sentinel会分析并取出命令请求中包含的各个参数，并根据其中的主服务器IP和端口号，检查主服务器是否已下线，然后向源Sentinel返回一条包含三个参数的Multi Bulk回复作为SENTINEL is-master-down-by命令的回复：
 
-```
+```text
 1) <down_state>
 2) <leader_runid>
 3) <leader_epoch>
@@ -617,7 +617,7 @@ leader_epoch | 目标Sentinel的局部领头Sentinel的配置纪元，用于选�
 
 ##### 客观下线状态的判断条件
 当认为主服务器已经进入下线状态的Sentinel的数量，超过Sentinel配置中设置的quorum参数的值，那么该Sentinel就会认为主服务器已经进入客观下线状态。比如说，如果Sentinel在启动时载入了以下配置：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 2
 ```
 那么包括当前Sentinel在内，只要总共有两个Sentinel认为主服务器已经进入下线状态，那么当前Sentinel就将主服务器判断为客观下线。
@@ -625,12 +625,12 @@ sentinel monitor master 127.0.0.1 6379 2
 ##### 不同Sentinel判断客观下线的条件可能不同
 监视同一个主服务器的多个Sentinel，它们将主服务器标判断为客观下线的条件可能也不同：当一个Sentinel将主服务器判断为客观下线时，其他Sentinel可能并不是那么认为的。  
 比如说，对于监视同一个主服务器的五个Sentinel来说，如果Sentinel1在启动时载入了以下配置：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 2
 ```
 那么当五个Sentinel中有两个Sentinel认为主服务器已经下线时，Sentinel1就会将主服务器标判断为客观下线。  
 而对于载入了以下配置的Sentinel2来说：
-```
+```bash
 sentinel monitor master 127.0.0.1 6379 5
 ```
 仅有两个Sentinel认为主服务器已下线，并不会令Sentinel2将主服务器判断为客观下线。
@@ -690,13 +690,13 @@ Redis集群是Redis提供的分布式数据库方案，集群通过分片（shar
 ### 节点
 一个Redis集群通常由多个节点（node）组成。  
 连接各个节点构成集群的工作可以使用CLUSTER MEET命令来完成：
-```
+```bash
 CLUSTER MEET <ip> <port>
 ```
 向一个节点node发送CLUSTER MEET命令，可以让node节点与ip和port所指定的节点进行握手（handshake），当握手成功时，node节点就会将ip和port所指定的节点添加到node节点当前所在的集群中。
 
 假设现在有三个独立的节点127.0.0.1:7000、127.0.0.1:7001、127.0.0.1:7002，首先使用客户端连上节点7000，通过发送CLUSTER NODE命令可以查看集群的节点：
-```
+```bash
 $ redis-cli -c -p 7000
 127.0.0.1:7000> CLUSTER NODES
 51549e625cfda318ad27423a31e7476fe3cd2939 :0 myself,master - 0 0 0 connected
@@ -729,7 +729,7 @@ OK
 ##### 集群数据结构
 clusterNode结构保存了一个节点的当前状态，比如节点的创建时间、节点的名字、节点当前的配置纪元、节点的IP地址和端口号等。  
 每个节点都会使用一个clusterNode结构来记录自己的状态，并为集群中的所有其他节点（包括主节点和从节点）都创建一个相应的clusterNode结构，以此来记录其他节点的状态：
-```
+```c
 struct clusterNode {
   // 创建节点的时间
   mstime_t ctime;
@@ -751,7 +751,7 @@ struct clusterNode {
 ```
 
 clusterNode结构的link属性是一个clusterLink结构，该结构保存了连接节点所需的有关信息，比如套接字描述符，输入缓冲区和输出缓冲区。
-```
+```c
 typedef struct clusterLink {
   // 连接的创建时间
   mstime_t ctime;
@@ -770,7 +770,7 @@ typedef struct clusterLink {
 redisClient结构和clusterLink结构都有自己的套接字描述符和输入、输出缓冲区，这两个结构的区别在于，redisClient结构中的套接字和缓冲区是用于连接客户端的，而clusterLink结构中的套接字和缓冲区则是用于连接节点的。
 
 每个节点都保存着一个clusterState结构，这个结构记录了在当前节点的视角下，集群目前所处的状态，例如集群是在线还是下线，集群包含多少个节点，集群当前的配置纪元，诸如此类：
-```
+```c
 typedef struct clusterState {
   // 指向当前节点的指针
   clusterNode *myself;
@@ -789,7 +789,7 @@ typedef struct clusterState {
 
 ##### CLUSTER MEET命令的实现
 通过向节点A发送CLUSTER MEET命令，客户端可以让接收命令的节点A将另一个节点B添加到节点A当前所在的集群里面：
-```
+```bash
 CLUSTER MEET <ip> <port>
 ```
 收到命令的节点A将与节点B进行握手（handshake），以此来确认彼此的存在，并为将来的进一步通信打好基础：
@@ -808,7 +808,7 @@ Redis集群通过分片的方式来保存数据库中的键值对：集群的整
 当数据库中的16384个槽都有节点在处理时，集群处于上线状态（ok）；相反地，如果数据库中有任何一个槽没有得到处理，那么集群处于下线状态（fail）。
 
 CLUSTER MEET命令将7000、7001、7002三个节点连接到了同一个集群里，不过这个集群目前仍然处于下线状态，因为集群中的三个节点都没有在处理任何槽：
-```
+```bash
 127.0.0.1:7000> CLUSTER INFO
 cluster_state:fail
 cluster_slots_assigned:0
@@ -822,12 +822,12 @@ cluster_stats_messages_sent:110
 cluster_stats_messages_received:28
 ```
 通过向节点发送CLUSTER ADDSLOTS命令，可以将一个或多个槽指派（assign）给节点负责：
-```
+```bash
 CLUSTER ADDSLOTS <slot> [slot ...]
 ```
 
 使用CLUSTER ADDSLOTS命令将数据库中的16384个槽分别指派给7000、7001、7002三个节点，使集群进入上线状态：
-```
+```bash
 127.0.0.1:7000> CLUSTER ADDSLOTS 0 1 2 3 4 ... 5000
 OK
 127.0.0.1:7001> CLUSTER ADDSLOTS 5001 5002 5003 5004 ... 10000
@@ -853,7 +853,7 @@ cluster_stats_messages_received:2617
 
 #### 记录节点的槽指派信息
 clusterNode结构的slots属性和numslot属性记录了节点负责处理哪些槽：
-```
+```c
 struct clusterNode {
   // ...
   unsigned char slots[16384/8];
@@ -878,7 +878,7 @@ Redis以0为起始索引，16383为终止索引，对slots数组中的16384个�
 
 #### 记录集群所有槽的指派信息
 clusterState结构中的slots数组记录了集群中所有16384个槽的指派信息：
-```
+```c
 typedef struct clusterState {
   // ...
   clusterNode *slots[16384];
@@ -910,7 +910,7 @@ clusterNode.slots与clusterState.slots的示例：
 - 如果键所在的槽并没有指派给当前节点，那么节点会向客户端返回一个MOVED错误，指引客户端转向（redirect）至正确的节点，并再次发送之前想要执行的命令。
 
 在7000、7001、7002三个节点组成的集群中执行如下命令：
-```
+```bash
 127.0.0.1:7000> SET date "2013-12-31"
 OK
 
@@ -925,14 +925,14 @@ SET msg会先被转向至节点7001再执行，是因为键msg所在的槽6257�
 
 ##### 计算键属于哪个槽
 节点使用以下算法来计算给定键key属于哪个槽：
-```
+```c
 def slot_number(key):
     return CRC16(key) & 16383
 ```
 其中CRC16（key）语句用于计算键key的CRC-16校验和，而&16383语句则用于计算出一个介于0至16383之间的整数作为键key的槽号。
 
 使用CLUSTER KEYSLOT \<key>命令可以查看一个给定键属于哪个槽：
-```
+```bash
 127.0.0.1:7000> CLUSTER KEYSLOT "date"
 (integer) 2022
 127.0.0.1:7000> CLUSTER KEYSLOT "msg"
@@ -953,7 +953,7 @@ def slot_number(key):
 
 ###### 被隐藏的MOVED错误
 集群模式的redis-cli客户端在接收到MOVED错误时，并不会打印出MOVED错误，而是根据MOVED错误自动进行节点转向，并打印出转向信息，所以我们是看不见节点返回的MOVED错误的：
-```
+```bash
 $ redis-cli -c -p 7000 
 # 集群模式
 127.0.0.1:7000> SET msg "happy new year!"
@@ -962,7 +962,7 @@ OK
 127.0.0.1:7001>
 ```
 但是，如果我们使用单机（stand alone）模式的redis-cli客户端，再次向节点7000发送相同的命令，那么MOVED错误就会被客户端打印出来：
-```
+```bash
 $ redis-cli -p 7000 
 # 单机模式
 127.0.0.1:7000> SET msg "happy new year!"
@@ -975,7 +975,7 @@ $ redis-cli -p 7000
 节点和单机服务器在数据库方面的一个区别是，节点只能使用0号数据库，而单机Redis服务器则没有这一限制。
 
 除了将键值对保存在数据库里面之外，节点还会用clusterState结构中的slots_to_keys跳跃表来保存槽和键之间的关系：
-```
+```c
 typedef struct clusterState {
   // ...
   zskiplist *slots_to_keys;
@@ -1014,7 +1014,7 @@ redis-trib对集群的单个槽slot进行重新分片的步骤如下：
 
 ###### 被隐藏的ASK错误
 集群模式的redis-cli在接到ASK错误时也不会打印错误，而是自动根据错误提供的IP地址和端口进行转向动作。如果想看到节点发送的ASK错误的话，可以使用单机模式的redis-cli客户端：
-```
+```bash
 $ redis-cli -p 7002
 127.0.0.1:7002> GET "love"
 (error) ASK 16198 127.0.0.1:7003
@@ -1022,7 +1022,7 @@ $ redis-cli -p 7002
 
 #### 导入槽
 clusterState结构的importing_slots_from数组记录了当前节点正在从其他节点导入的槽：
-```
+```c
 typedef struct clusterState {
   // ...
   clusterNode *importing_slots_from[16384];
@@ -1032,14 +1032,14 @@ typedef struct clusterState {
 如果importing_slots_from[i]的值不为NULL，而是指向一个clusterNode结构，那么表示当前节点正在从clusterNode所代表的节点导入槽i。
 
 在对集群进行重新分片的时候，向目标节点发送命令：
-```
+```bash
 CLUSTER SETSLOT <i> IMPORTING <source_id>
 ```
 可以将目标节点clusterState.importing_slots_from[i]的值设置为source_id所代表节点的clusterNode结构。
 
 #### 迁移槽
 clusterState结构的migrating_slots_to数组记录了当前节点正在迁移至其他节点的槽：
-```
+```c
 typedef struct clusterState {
    // ...
    clusterNode *migrating_slots_to[16384];
@@ -1049,7 +1049,7 @@ typedef struct clusterState {
 如果migrating_slots_to[i]的值不为NULL，而是指向一个clusterNode结构，那么表示当前节点正在将槽i迁移至clusterNode所代表的节点。
 
 在对集群进行重新分片的时候，向源节点发送命令：
-```
+```bash
 CLUSTER SETSLOT <i> MIGRATING <target_id>
 ```
 可以将源节点clusterState.migrating_slots_to[i]的值设置为target_id所代表节点的clusterNode结构。
@@ -1079,11 +1079,11 @@ Redis集群中的节点分为主节点（master）和从节点（slave），其�
 
 #### 设置从节点
 向一个节点发送如下命令可以让接收命令的节点成为node_id所指定节点的从节点，并开始对主节点进行复制：
-```
+```bash
 CLUSTER REPLICATE <node_id>
 ```
 1. 接收到该命令的节点首先会在自己的clusterState.nodes字典中找到node_id所对应节点的clusterNode结构，并将自己的clusterState.myself.slaveof指针指向这个结构，以此来记录这个节点正在复制的主节点：
-```
+```c
    struct clusterNode {
      // ...
      // 如果这是一个从节点，那么指向主节点
@@ -1096,7 +1096,7 @@ CLUSTER REPLICATE <node_id>
 
 一个节点成为从节点，并开始复制某个主节点这一信息会通过消息发送给集群中的其他节点，最终集群中的所有节点都会知道某个从节点正在复制某个主节点。  
 集群中的所有节点都会在代表主节点的clusterNode结构的slaves属性和numslaves属性中记录正在复制这个主节点的从节点名单：
-```
+```c
 struct clusterNode {
     // ...
     // 正在复制这个主节点的从节点数量
@@ -1113,7 +1113,7 @@ struct clusterNode {
 集群中的各个节点会通过互相发送消息的方式来交换集群中各个节点的状态信息，例如某个节点是处于在线状态、疑似下线状态（PFAIL），还是已下线状态（FAIL）。
 
 当一个主节点A通过消息得知主节点B认为主节点C进入了疑似下线状态时，主节点A会在自己的clusterState.nodes字典中找到主节点C所对应的clusterNode结构，并将主节点B的下线报告（failure report）添加到clusterNode结构的fail_reports链表里面：
-```
+```c
 struct clusterNode {
   // ...
   // 一个链表，记录了所有其他节点对该节点的下线报告
@@ -1169,7 +1169,7 @@ struct clusterNodeFailReport {
 #### 消息头
 节点发送的所有消息都由一个消息头包裹，消息头除了包含消息正文之外，还记录了消息发送者自身的一些信息，因为这些信息也会被消息接收者用到，所以严格来讲，我们可以认为消息头本身也是消息的一部分。  
 每个消息头都由一个cluster.h/clusterMsg结构表示：
-```
+```c
 typedef struct {
   // 消息的长度（包括这个消息头的长度和消息正文的长度）
   uint32_t totlen;
@@ -1203,7 +1203,7 @@ typedef struct {
 clusterMsg结构的currentEpoch、sender、myslots等属性记录了发送者自身的节点信息，接收者会根据这些信息，在自己的clusterState.nodes字典里找到发送者对应的clusterNode结构，并对结构进行更新。
 
 clusterMsg.data属性指向联合cluster.h/clusterMsgData，这个联合就是消息的正文：
-```
+```c
 union clusterMsgData {
   // MEET、PING、PONG消息的正文
   struct {
@@ -1228,7 +1228,7 @@ Redis集群中的各个节点通过Gossip协议来交换各自关于不同节点
 
 每次发送MEET、PING、PONG消息时，发送者都从自己的已知节点列表中随机选出两个节点（可以是主节点或者从节点），并将这两个被选中节点的信息分别保存到两个clusterMsgDataGossip结构里面。  
 clusterMsgDataGossip结构记录了被选中节点的名字，发送者与被选中节点最后一次发送和接收PING消息和PONG消息的时间戳，被选中节点的IP地址和端口号，以及被选中节点的标识值：
-```
+```c
 typedef struct {
   // 节点的名字
   char nodename[REDIS_CLUSTER_NAMELEN];
@@ -1255,7 +1255,7 @@ typedef struct {
 在集群的节点数量比较大的情况下，单纯使用Gossip协议来传播节点的已下线信息会给节点的信息更新带来一定延迟，因为Gossip协议消息通常需要一段时间才能传播至整个集群，而发送FAIL消息可以让集群里的所有节点立即知道某个主节点已下线，从而尽快判断是否需要将集群标记为下线，又或者对下线主节点进行故障转移。
 
 FAIL消息的正文由cluster.h/clusterMsgDataFail结构表示，这个结构只包含一个nodename属性，该属性记录了已下线节点的名字：
-```
+```c
 typedef struct {
     char nodename[REDIS_CLUSTER_NAMELEN];
 } clusterMsgDataFail;
@@ -1264,13 +1264,13 @@ typedef struct {
 
 #### PUBLISH消息的实现
 客户端向集群中的某个节点发送命令：
-```
+```bash
 PUBLISH <channel> <message>
 ```
 接收到PUBLISH命令的节点不仅会向channel频道发送消息message，它还会向集群广播一条PUBLISH消息，所有接收到这条PUBLISH消息的节点都会向channel频道发送message消息。
 
 PUBLISH消息的正文由cluster.h/clusterMsgDataPublish结构表示：
-```
+```c
 typedef struct {
   uint32_t channel_len;
   uint32_t message_len;

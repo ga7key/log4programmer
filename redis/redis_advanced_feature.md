@@ -11,7 +11,7 @@ Redis的发布与订阅功能由PUBLISH、SUBSCRIBE、PSUBSCRIBE等命令组成�
 ###### 订阅频道
 当一个客户端执行SUBSCRIBE命令订阅某个或某些频道的时候，这个客户端与被订阅频道之间就建立起了一种订阅关系。  
 Redis将所有频道的订阅关系都保存在服务器状态的pubsub_channels字典里面，这个字典的键是某个被订阅的频道，而键的值则是一个链表，链表里面记录了所有订阅这个频道的客户端：
-```
+```c
 struct redisServer {
   // ...
   // 保存所有频道的订阅关系
@@ -26,7 +26,7 @@ struct redisServer {
 - 如果频道还未有任何订阅者，那么它必然不存在于pubsub_channels字典，程序首先要在pubsub_channels字典中为频道创建一个键，并将这个键的值设置为空链表，然后再将客户端添加到链表，成为链表的第一个元素。
 
 例如，现有客户端client-10086执行命令：
-```
+```bash
 SUBSCRIBE "news.sport" "news.movie"
 ```
 
@@ -38,13 +38,13 @@ UNSUBSCRIBE命令的行为和SUBSCRIBE命令的行为正好相反，当一个客
 - 如果删除退订客户端之后，频道的订阅者链表变成了空链表，那么说明这个频道已经没有任何订阅者了，程序将从pubsub_channels字典中删除频道对应的键。
 
 执行命令示例：
-```
+```bash
 UNSUBSCRIBE "news.sport" "news.movie"
 ```
 
 ###### 订阅模式
 服务器将所有模式的订阅关系都保存在服务器状态的pubsub_patterns属性里面：
-```
+```c
 struct redisServer {
   // ...
   // 保存所有模式订阅关系
@@ -53,7 +53,7 @@ struct redisServer {
 };
 ```
 pubsub_patterns属性是一个链表，链表中的每个节点都包含着一个pubsub Pattern结构，这个结构的pattern属性记录了被订阅的模式，而client属性则记录了订阅模式的客户端：
-```
+```c
 typedef struct pubsubPattern {
   // 订阅模式的客户端
   redisClient *client;
@@ -67,7 +67,7 @@ typedef struct pubsubPattern {
 2. 将pubsubPattern结构添加到pubsub_patterns链表的表尾。
 
 执行命令示例：
-```
+```bash
 PSUBSCRIBE "news.*"
 ```
 
@@ -77,7 +77,7 @@ PSUBSCRIBE "news.*"
 当一个客户端退订某个或某些模式的时候，服务器将在pubsub_patterns链表中查找并删除那些pattern属性为被退订模式，并且client属性为执行退订命令的客户端的pubsubPattern结构。
 
 执行命令示例：
-```
+```bash
 PUNSUBSCRIBE "news.*"
 ```
 
@@ -90,7 +90,7 @@ PUNSUBSCRIBE "news.*"
 因为服务器状态中的pubsub_channels字典记录了所有频道的订阅关系，所以为了将消息发送给channel频道的所有订阅者，PUBLISH命令要做的就是在pubsub_channels字典里找到频道channel的订阅者名单（一个链表），然后将消息发送给名单上的所有客户端。
 
 执行命令示例：
-```
+```bash
 PUBLISH "news.it" "hello"
 ```
 
@@ -106,7 +106,7 @@ PUBSUB CHANNELS [pattern]子命令用于返回服务器当前被订阅的频道�
 ▶ 如果给定pattern参数，那么命令返回服务器当前被订阅的频道中那些与pattern模式相匹配的频道。
 
 执行PUBSUB CHANNELS命令将返回服务器目前被订阅的频道：
-```
+```bash
 redis> PUBSUB CHANNELS
 1) "news.it"
 2) "news.sport"
@@ -115,7 +115,7 @@ redis> PUBSUB CHANNELS
 ```
 
 执行PUBSUB CHANNELS "news.[is]\*"命令将返回"news.it"和"news.sport"两个频道，因为只有这两个频道和"news.[is]\*"模式相匹配：
-```
+```bash
 redis> PUBSUB CHANNELS "news.[is]*"
 1) "news.it"
 2) "news.sport"
@@ -126,7 +126,7 @@ PUBSUB NUMSUB [channel-1 channel-2...channel-n]子命令接受任意多个频道
 这个子命令是通过在pubsub_channels字典中找到频道对应的订阅者链表，然后返回订阅者链表的长度来实现的（订阅者链表的长度就是频道订阅者的数量）。
 
 执行命令示例：
-```
+```bash
 redis> PUBSUB NUMSUB news.it news.sport news.business news.movie
 1) "news.it"
 2) "3"
@@ -143,7 +143,7 @@ PUBSUB NUMPAT子命令用于返回服务器当前被订阅模式的数量。
 这个子命令是通过返回pubsub_patterns链表的长度来实现的，因为这个链表的长度就是服务器被订阅模式的数量。
 
 执行命令示例：
-```
+```bash
 redis> PUBSUB NUMPAT
 (integer) 3
 ```
@@ -152,7 +152,7 @@ redis> PUBSUB NUMPAT
 ## 事务
 Redis通过MULTI、EXEC、WATCH等命令来实现事务（transaction）功能。事务提供了一种将多个命令请求打包，然后一次性、按顺序地执行多个命令的机制，并且在事务执行期间，服务器不会中断事务而改去执行其他客户端的命令请求，它会将事务中的所有命令都执行完毕，然后才去处理其他客户端的命令请求。  
 以下是一个事务执行的过程，该事务首先以一个MULTI命令为开始，接着将多个命令放入事务当中，最后由EXEC命令将这个事务提交（commit）给服务器执行：
-```
+```bash
 redis> MULTI
 OK
 redis> SET "name" "Practical Common Lisp"
@@ -178,7 +178,7 @@ redis> EXEC
 
 ###### 事务开始
 MULTI命令的执行标志着事务的开始，MULTI命令可以将执行该命令的客户端从非事务状态切换至事务状态，这一切换是通过在客户端状态的flags属性中打开REDIS_MULTI标识来完成的：
-```
+```bash
 redis> MULTI
 OK
 ```
@@ -191,7 +191,7 @@ OK
 
 ###### 事务队列
 每个Redis客户端都有自己的事务状态，这个事务状态保存在客户端状态的mstate属性里面：
-```
+```c
 typedef struct redisClient {
   // ...
   // 事务状态
@@ -201,7 +201,7 @@ typedef struct redisClient {
 ```
 
 事务状态包含一个事务队列，以及一个已入队命令的计数器（也可以说是事务队列的长度）：
-```
+```c
 typedef struct multiState {
   // 事务队列，FIFO顺序
   multiCmd *commands;
@@ -211,7 +211,7 @@ typedef struct multiState {
 ```
 
 事务队列是一个multiCmd类型的数组，数组中的每个multiCmd结构都保存了一个已入队命令的相关信息，包括指向命令实现函数的指针、命令的参数，以及参数的数量：
-```
+```c
 typedef struct multiCmd { 
   // 参数
   robj **argv;
@@ -237,7 +237,7 @@ WATCH命令是一个乐观锁（optimistic locking），它可以在EXEC命令�
 
 #### 使用WATCH命令监视数据库键
 每个Redis数据库都保存着一个watched_keys字典，这个字典的键是某个被WATCH命令监视的数据库键，而字典的值则是一个链表，链表中记录了所有监视相应数据库键的客户端：
-```
+```c
 typedef struct redisDb {
   // ...
   // 正在被WATCH命令监视的键
@@ -261,14 +261,14 @@ typedef struct redisDb {
 
 #### 一个完整的WATCH事务执行过程
 1. 客户端c10086执行以下WATCH命令：
-```
+```bash
 c10086> WATCH "name"
 OK
 ```
 c10086会被加入到watched_keys字典的"name"键所对应的链表中。
 
 2. 客户端c10086继续向服务器发送MULTI命令，并将一个SET命令放入事务队列：
-```
+```bash
 c10086> MULTI
 OK
 c10086> SET "name" "peter"
@@ -276,7 +276,7 @@ QUEUED
 ```
 
 3. 另一个客户端c999向服务器发送了一条SET命令，将"name"键的值设置成了"john"：
-```
+```bash
 c999> SET "name" "john"
 OK
 ```
@@ -284,7 +284,7 @@ OK
 4. c999执行的这个SET命令会导致正在监视"name"的所有客户端的REDIS_DIRTY_CAS标识被打开，其中包括客户端c10086。
 
 5. 当c10086向服务器发送EXEC命令时候，因为c10086的REDIS_DIRTY_CAS标志已经被打开，所以服务器将拒绝执行它提交的事务：
-```
+```bash
 c10086> EXEC
 (nil)
 ```
@@ -347,13 +347,13 @@ Redis通过谨慎的错误检测和简单的设计来保证事务的一致性。
 Redis从2.6版本开始引入对Lua脚本的支持，通过在服务器中嵌入Lua环境，Redis客户端可以使用Lua脚本，直接在服务器端原子地执行多个Redis命令。
 
 使用EVAL命令可以直接对输入的脚本进行求值：
-```
+```bash
 redis> EVAL "return 'hello world'" 0
 "hello world"
 ```
 
 使用EVALSHA命令则可以根据脚本的SHA1校验和来对脚本进行求值，但这个命令要求校验和对应的脚本必须至少被EVAL命令执行过一次，或者这个校验和对应的脚本曾经被SCRIPT LOAD命令载入过：
-```
+```bash
 redis> EVAL "return 1+1" 0
 (integer) 2
 redis> EVALSHA "a27e7e8a43702b7046d4f6a7ccf5b60cef6b9bd9" 0 // 上一个脚本的校验和
@@ -402,7 +402,7 @@ lua_open函数创建的只是一个基本的Lua环境，为了让这个Lua环境
 - 用于返回错误信息的redis.error_reply函数和redis.status_reply函数。
 
 最常用也最重要的要数redis.call函数和redis.pcall函数，通过这两个函数，用户可以直接在Lua脚本中执行Redis命令：
-```
+```bash
 redis> EVAL "return redis.call('PING')" 0
 PONG
 ```
@@ -416,7 +416,7 @@ Redis使用自制的函数替换了math库中原有的math.random函数和math.r
     除非在脚本中使用math.randomseed显式地修改seed，否则每次运行脚本时，Lua环境都使用固定的math.randomseed（0）语句来初始化seed。
 
 例如，使用以下脚本可以打印seed值为0时，math.random对于输入10至1所产生的随机序列：
-```
+```lua
 --random-with-default-seed.lua
 local i = 10
 local seq = {}
@@ -428,7 +428,7 @@ return seq
 ```
 
 无论执行这个脚本多少次，产生的值都是相同的：
-```
+```bash
 $ redis-cli --eval random-with-default-seed.lua
 1) (integer) 1
 2) (integer) 2
@@ -443,7 +443,7 @@ $ redis-cli --eval random-with-default-seed.lua
 ```
 
 但是，如果在另一个脚本里面，调用math.randomseed将seed修改为10086：
-```
+```lua
 --random-with-new-seed.lua
 math.randomseed(10086)
 local i = 10
@@ -456,7 +456,7 @@ return seq
 ```
 
 那么这个脚本生成的随机数序列将和使用默认seed值0时生成的随机序列不同：
-```
+```bash
 $ redis-cli --eval random-with-new-seed.lua
 1) (integer) 1
 2) (integer) 1
@@ -483,7 +483,7 @@ Redis将SMEMBERS这种在相同数据集上可能会产生不同输出的命令�
 服务器将对Lua环境中的全局环境进行保护，确保传入服务器的脚本不会因为忘记使用local关键字而将额外的全局变量添加到Lua环境里面。
 
 因为全局变量保护的原因，当一个脚本试图创建一个全局变量时，服务器将报告一个错误：
-```
+```bash
 redis> EVAL "x = 10" 0
 (error) ERR Error running script
 (call to f_df1ad3745c2d2f078f0f41377a92bb6f8ac79af0):
@@ -492,7 +492,7 @@ Script attempted to create global variable 'x'
 ```
 
 试图获取一个不存在的全局变量也会引发一个错误：
-```
+```bash
 redis> EVAL "return x" 0
 (error) ERR Error running script
 (call to f_03c387736bb5cc009ff35151572cee04677aa374):
@@ -501,7 +501,7 @@ Script attempted to access unexisting global variable 'x'
 ```
 
 不过Redis并未禁止用户修改已存在的全局变量，所以在执行Lua脚本的时候，必须非常小心，以免错误地修改了已存在的全局变量：
-```
+```bash
 redis> EVAL "redis = 10086; return redis" 0
 (integer) 10086
 ```
@@ -527,7 +527,7 @@ Lua脚本使用redis.call函数或者redis.pcall函数执行一个Redis命令，
 
 #### lua_scripts字典
 lua_scripts字典的键为某个Lua脚本的SHA1校验和（checksum），而字典的值则是SHA1校验和对应的Lua脚本。
-```
+```c
 struct redisServer {
     // ...
     dict *lua_scripts;
@@ -549,12 +549,12 @@ EVAL命令的执行过程可以分为以下三个步骤：
 当客户端向服务器发送EVAL命令，要求执行某个Lua脚本的时候，服务器首先要做的就是在Lua环境中，为传入的脚本定义一个与这个脚本相对应的Lua函数，其中，Lua函数的名字由f_前缀加上脚本的SHA1校验和（四十个字符长）组成，而函数的体（body）则是脚本本身。
 
 举个例子，对于命令：
-```
+```bash
 EVAL "return 'hello world'" 0
 ```
 
 来说，服务器将在Lua环境中定义以下函数：
-```
+```c
 function f_5332031c6b470dc5a0dd9b4bf2030dea6d65de91()
     return 'hello world'
 end
@@ -585,20 +585,20 @@ EVAL命令要做的第二件事是将客户端传入的脚本保存到服务器�
 只要脚本对应的函数曾经在Lua环境里面定义过，那么即使不知道脚本的内容本身，客户端也可以根据脚本的SHA1校验和来调用脚本对应的函数，从而达到执行脚本的目的，这就是EVALSHA命令的实现原理。
 
 举个例子，当服务器执行完以下EVAL命令之后：
-```
+```bash
 redis> EVAL "return 'hello world'" 0
 "hello world"
 ```
 
 Lua环境里面就定义了以下函数：
-```
+```c
 function f_5332031c6b470dc5a0dd9b4bf2030dea6d65de91()
     return 'hello world'
 end
 ```
 
 当客户端执行以下EVALSHA命令时：
-```
+```bash
 redis> EVALSHA "5332031c6b470dc5a0dd9b4bf2030dea6d65de91" 0
 "hello world"
 ```
@@ -633,24 +633,24 @@ SCRIPT LOAD命令所做的事情和EVAL命令执行脚本时所做的前两步�
 EVALSHA命令是所有与Lua脚本有关的命令中，复制操作最复杂的一个，因为主服务器与从服务器载入Lua脚本的情况可能有所不同，所以主服务器不能像复制EVAL命令、SCRIPT LOAD命令或者SCRIPT FLUSH命令那样，直接将EVALSHA命令传播给从服务器。对于一个在主服务器被成功执行的EVALSHA命令来说，相同的EVALSHA命令在从服务器执行时却可能会出现脚本未找到（not found）错误。
 
 举个例子，假设现在有一个主服务器master，如果客户端向主服务器发送命令：
-```
+```bash
 master> SCRIPT LOAD "return 'hello world'"
 "5332031c6b470dc5a0dd9b4bf2030dea6d65de91"
 ```
 
 假设一个从服务器slave1开始复制主服务器master，如果master不想办法将脚本：
-```
+```bash
 "return 'hello world'"
 ```
 
 传送给slave1载入的话，那么当客户端向主服务器发送命令的时候，master将成功执行这个EVALSHA命令：
-```
+```bash
 master> EVALSHA "5332031c6b470dc5a0dd9b4bf2030dea6d65de91" 0
 "hello world"
 ```
 
 而当master将这个命令传播给slave1执行的时候，slave1却会出现脚本未找到错误：
-```
+```bash
 slave1> EVALSHA "5332031c6b470dc5a0dd9b4bf2030dea6d65de91" 0
 (error) NOSCRIPT No matching script. Please use EVAL.
 ```
@@ -662,7 +662,7 @@ slave1> EVALSHA "5332031c6b470dc5a0dd9b4bf2030dea6d65de91" 0
 
 ###### 1.判断传播EVALSHA命令是否安全的方法
 主服务器使用服务器状态的repl_scriptcache_dict字典记录自己已经将哪些脚本传播给了所有从服务器：
-```
+```c
 struct redisServer {
     // ...
     dict *repl_scriptcache_dict;
@@ -676,7 +676,7 @@ repl_scriptcache_dict字典的键是一个个Lua脚本的SHA1校验和，而字�
 
 ###### 3.EVALSHA命令转换成EVAL命令的方法
 通过使用EVALSHA命令指定的SHA1校验和，以及lua_scripts字典保存的Lua脚本，服务器总可以将一个EVALSHA命令转换成一个等价的EVAL命令：
-```
+```bash
 EVALSHA <sha1> <numkeys> [key ...] [arg ...]
 EVAL <script> <numkeys> [key ...] [arg ...]
 ```
@@ -700,13 +700,13 @@ EVAL <script> <numkeys> [key ...] [arg ...]
 Redis的SORT命令可以对列表键、集合键或者有序集合键的值进行排序。
 
 #### SORT \<key>
-```
+```bash
 SORT <key>
 ```
 可以对一个键key的值进行排序。
 
 以下示例展示了如何使用SORT命令对一个包含三个数字值的列表键进行排序：
-```
+```bash
 redis> RPUSH numbers 3 1 2
 (integer) 3
 redis> SORT numbers
@@ -724,7 +724,7 @@ redis> SORT numbers
 ![array_sorted](../images/redis/2024-03-26_array_sorted.png)
 
 以下是redisSortObject结构的完整定义：
-```
+```c
 typedef struct _redisSortObject {
     // 被排序键的值
     robj *obj;
@@ -741,12 +741,12 @@ SORT命令为每个被排序的键都创建一个与键长度相同的数组，�
 
 #### ALPHA
 通过使用ALPHA选项，SORT命令可以对包含字符串值的键进行排序：
-```
+```bash
 SORT <key> ALPHA
 ```
 
 以下命令展示了如何使用SORT命令对一个包含三个字符串值的集合键进行排序：
-```
+```bash
 redis> SADD fruits apple banana cherry
 (integer) 3
 # 元素在集合中是乱序存放的
@@ -769,13 +769,13 @@ redis> SORT fruits ALPHA
 
 #### ASC和DESC
 在默认情况下，SORT命令执行升序排序，排序后的结果按值的大小从小到大排列，以下两个命令是完全等价的：
-```
+```bash
 SORT <key>
 SORT <key> ASC
 ```
 
 在执行SORT命令时使用DESC选项，可以让命令执行降序排序，让排序后的结果按值的大小从大到小排列：
-```
+```bash
 SORT <key> DESC
 ```
 
@@ -784,7 +784,7 @@ SORT <key> DESC
 #### BY
 在默认情况下，SORT命令使用被排序键包含的元素作为排序的权重，元素本身决定了元素在排序之后所处的位置。  
 通过使用BY选项，SORT命令可以指定某些字符串键，或者某个哈希键所包含的某些域（field）来作为元素的权重，对一个键进行排序。
-```
+```bash
 redis> MSET apple-price 8 banana-price 5.5 cherry-price 7
 OK
 redis> SORT fruits BY *-price
@@ -818,7 +818,7 @@ redis> SORT fruits BY *-price
 
 ##### 带有ALPHA选项的BY
 BY选项默认假设权重键保存的值为数字值，如果权重键保存的是字符串值的话，那么就需要在使用BY选项的同时，配合使用ALPHA选项。
-```
+```bash
 redis> SADD fruits "apple" "banana" "cherry"
 (integer) 3
 redis> MSET apple-id "FRUIT-25" banana-id "FRUIT-79" cherry-id "FRUIT-13"
@@ -863,7 +863,7 @@ LIMIT选项的格式为LIMIT \<offset> \<count>：
 #### GET
 在默认情况下，SORT命令在对键进行排序之后，总是返回被排序键本身所包含的元素。  
 通过使用GET选项，我们可以让SORT命令在对键进行排序之后，根据被排序的元素，以及GET选项所指定的模式，查找并返回某些键的值。
-```
+```bash
 # 设置peter、jack、tom的全名
 redis> SET peter-name "Peter White"
 OK
@@ -901,7 +901,7 @@ redis> SORT students ALPHA GET *-name
     最后返回的是tom-name键的值"Tom Smith"。
 
 因为一个SORT命令可以带有多个GET选项，所以随着GET选项的增多，命令要执行的查找操作也会增多。
-```
+```bash
 # 排序students集合，并获取相应的全名和出生日期
 redis> SORT students ALPHA GET *-name GET *-birth
 ```
@@ -909,7 +909,7 @@ redis> SORT students ALPHA GET *-name GET *-birth
 #### STORE
 在默认情况下，SORT命令只向客户端返回排序结果，而不保存排序结果。  
 通过使用STORE选项，我们可以将排序结果保存在指定的键里面，并在有需要时重用这个排序结果：
-```
+```bash
 redis> SORT students ALPHA STORE sorted_students
 (integer) 3
 redis> LRANGE sorted_students 0-1
@@ -941,7 +941,7 @@ redis> LRANGE sorted_students 0-1
 5. 向客户端返回排序结果集：在最后这一步，命令遍历排序结果集，并依次向客户端返回排序结果集中的元素。
 
 用客户端执行下面的SORT命令的顺序：
-```
+```bash
 SORT <key> ALPHA DESC BY <by-pattern> LIMIT <offset> <count> GET <get-pattern> STORE <store_key>
 # 命令会首先执行
 SORT <key> ALPHA DESC BY <by-pattern>
@@ -956,7 +956,7 @@ STORE <store_key>
 #### 选项的摆放顺序
 调用SORT命令时，除了GET选项之外，改变选项的摆放顺序并不会影响SORT命令执行这些选项的顺序。  
 如果命令包含了多个GET选项，那么在调整选项的位置时，必须保证多个GET选项的摆放顺序不变，这才可以让排序结果集保持不变。
-```
+```bash
 # 这两个命令产生的排序结果集不同
 SORT <key> STORE <store_key> GET <pattern-a> GET <pattern-b>
 SORT <key> STORE <store_key> GET <pattern-b> GET <pattern-a>
@@ -964,6 +964,260 @@ SORT <key> STORE <store_key> GET <pattern-b> GET <pattern-a>
 
 
 ## 二进制位数组
+Redis提供了SETBIT、GETBIT、BITCOUNT、BITOP四个命令用于处理二进制位数组（bit array，又称“位数组”）。
+
+- SETBIT命令用于为位数组指定偏移量上的二进制位设置值，位数组的偏移量从0开始计数，而二进制位的值则可以是0或者1：
+```bash
+redis> SETBIT bit 0 1        # 0000 0001 
+(integer) 0     
+redis> SETBIT bit 3 1        # 0000 1001 
+(integer) 0     
+redis> SETBIT bit 0 0        # 0000 1000 
+(integer) 1 
+```
+
+- GETBIT命令则用于获取位数组指定偏移量上的二进制位的值：
+```bash
+redis> GETBIT bit 0         # 0000 1000
+(integer) 0
+redis> GETBIT bit 3         # 0000 1000
+(integer) 1
+```
+
+- BITCOUNT命令用于统计位数组里面，值为1的二进制位的数量：
+```bash
+redis> BITCOUNT bit          # 0000 1000
+(integer) 1
+redis> SETBIT bit 0 1        # 0000 1001
+(integer) 0
+redis> BITCOUNT bit
+(integer) 2
+```
+
+- BITOP命令既可以对多个位数组进行按位与（and）、按位或（or）、按位异或（xor）运算，也可以对给定的位数组进行取反（not）运算：
+
+```bash
+redis> SETBIT x 3 1        # x = 0000 1011
+(integer) 0
+redis> SETBIT x 1 1
+(integer) 0
+redis> SETBIT x 0 1
+(integer) 0
+redis> SETBIT y 2 1        # y = 0000 0110
+(integer) 0
+redis> SETBIT y 1 1
+(integer) 0
+redis> SETBIT z 2 1        # z = 0000 0101
+(integer) 0
+redis> SETBIT z 0 1
+(integer) 0
+redis> BITOP AND and-result x y z            # 0000 0000
+(integer) 1
+redis> BITOP OR or-result x y z              # 0000 1111
+(integer) 1
+redis> BITOP XOR xor-result x y z            # 0000 1000
+(integer) 1
+
+redis> SETBIT value 0 1                # 0000 1001
+(integer) 0
+redis> SETBIT value 3 1
+(integer) 0
+redis> BITOP NOT not-value value       # 1111 0110
+(integer) 1
+```
+
+Redis使用字符串对象来表示位数组，因为字符串对象使用的SDS数据结构是二进制安全的，所以程序可以直接使用SDS结构来保存位数组，并使用SDS结构的操作函数来处理位数组。
+redisObject.type的值为REDIS_STRING，表示这是一个字符串对象。
+sdshdr.len的值为1，表示这个SDS保存了一个一字节长的位数组。
+buf数组中的buf[0]字节保存了一字节长的位数组。
+buf数组中的buf[1]字节保存了SDS程序自动追加到值的末尾的空字符'\0'。
+
+![sds_bitarray](../images/redis/2024-03-26_sds_bitarray.png)  
+为了清晰的展示每个字节，对示意图做了些许修改。buf数组的每个字节都用一行来表示，每行的第一个格子buf[i]表示这是buf数组的哪个字节，而buf[i]之后的八个格子则分别代表这一字节中的八个位。  
+![bitarray_3bytes](../images/redis/2024-03-26_bitarray_3bytes.png)  
+buf数组保存位数组的顺序和我们平时书写位数组的顺序是完全相反的。位数组1111 0000 1100 0011 1010 0101在buf数组中会被保存为1010 0101 1100 0011 00001111。  
+使用逆序来保存位数组可以简化SETBIT命令的实现。
+
+### GETBIT
+GETBIT命令用于返回位数组bitarray在offset偏移量上的二进制位的值：
+
+```bash
+GETBIT <bitarray> <offset>
+```
+
+GETBIT命令的执行过程如下：
+1. 计算byte= offset÷8，byte值记录了offset偏移量指定的二进制位保存在位数组的哪个字节。
+2. 计算bit=（offset mod 8）+1，bit值记录了offset偏移量指定的二进制位是byte字节的第几个二进制位。
+3. 根据byte值和bit值，在位数组bitarray中定位offset偏移量指定的二进制位，并返回这个位的值。
+
+因为GETBIT命令执行的所有操作都可以在常数时间内完成，所以该命令的算法复杂度为O(1)。
+
+举例：
+```bash
+GETBIT <bitarray> 10
+```
+1. 10÷8 的值为1。
+2. （10 mod 8）+1的值为3。
+3. 定位到buf[1]字节上面，然后取出该字节上的第3个二进制位的值。
+4. 向客户端返回二进制位的值0。
+
+![getbit_offset](../images/redis/2024-03-26_getbit_offset.png)
+
+### SETBIT
+SETBIT用于将位数组bitarray在offset偏移量上的二进制位的值设置为value，并向客户端返回二进制位被设置之前的旧值：
+
+```bash
+SETBIT <bitarray> <offset> <value>
+```
+
+以下是SETBIT命令的执行过程：
+1. 计算len= offset÷8 +1，len值记录了保存offset偏移量指定的二进制位至少需要多少字节。
+2. 检查bitarray键保存的位数组（也即是SDS）的长度是否小于len，如果是的话，将SDS的长度扩展为len字节，并将所有新扩展空间的二进制位的值设置为0。
+3. 计算byte= offset÷8，byte值记录了offset偏移量指定的二进制位保存在位数组的哪个字节。
+4. 计算bit=（offset mod 8）+1，bit值记录了offset偏移量指定的二进制位是byte字节的第几个二进制位。
+5. 根据byte值和bit值，在bitarray键保存的位数组中定位offset偏移量指定的二进制位，首先将指定二进制位现在值保存在oldvalue变量，然后将新值value设置为这个二进制位的值。
+6. 向客户端返回oldvalue变量的值。
+
+因为SETBIT命令执行的所有操作都可以在常数时间内完成，所以该命令的时间复杂度为O(1)。
+
+举例：
+```bash
+SETBIT <bitarray> 12 1
+```
+1. 计算 12÷8 +1，得出值2，这表示保存偏移量为12的二进制位至少需要2字节长的位数组。
+2. 对位数组的长度进行检查，得知位数组现在的长度为1字节，这比执行命令所需的最小长度2字节要小，所以程序会要求将位数组的长度扩展为2字节。不过，尽管程序只要求2字节长的位数组，但SDS的空间预分配策略会为SDS额外多分配2字节的未使用空间，再加上为保存空字符而额外分配的1字节，扩展之后buf数组的实际长度为5字节。
+3. 计算 12÷8，得出值1，说明偏移量为12的二进制位位于buf[1]字节中。
+4. 计算（12 mod 8）+1，得出值5，说明偏移量为12的二进制位是buf[1]字节的第5个二进制位。
+5. 定位到buf[1]字节的第5个二进制位，将二进制位现在的值0保存到oldvalue变量，然后将二进制位的值设置为1。
+6. 向客户端返回oldvalue变量的值0。
+
+![setbit_offset](../images/redis/2024-03-26_setbit_offset.png)
+
+因为buf数组使用逆序来保存位数组，所以当程序对buf数组进行扩展之后，写入操作可以直接在新扩展的二进制位中完成，而不必改动位数组原来已有的二进制位。  
+如果buf数组使用和书写位数组时一样的顺序来保存位数组，那么在每次扩展buf数组之后，程序都需要将位数组已有的位进行移动，然后才能执行写入操作，这比SETBIT命令目前的实现方式要复杂，并且移位带来的CPU时间消耗也会影响命令的执行速度。
+
+### BITCOUNT
+BITCOUNT命令用于统计给定位数组中，值为1的二进制位的数量。
+
+#### 二进制位统计算法：遍历算法
+实现BITCOUNT命令最简单直接的方法，就是遍历位数组中的每个二进制位，并在遇到值为1的二进制位时，将计数器的值增一。  
+遍历算法虽然实现起来简单，但效率非常低，因为这个算法在每次循环中只能检查一个二进制位的值是否为1，所以检查操作执行的次数将与位数组包含的二进制位的数量成正比。
+
+假设要检查的位数组的长度为100MB，那么按1MB=1000000Byte=8000000bit来计算，使用遍历算法检查长度为100MB的位数组将需要执行检查操作八亿次（100*8000000）！而对于长度为500MB的位数组来说，遍历算法将需要执行检查操作四十亿次！
+
+#### 二进制位统计算法：查表算法
+优化检查操作的一个办法是使用查表法：
+
+    对于一个有限集合来说，集合元素的排列方式是有限的。
+    对于一个有限长度的位数组来说，它能表示的二进制位排列也是有限的。
+
+根据这个原理，我们可以创建一个表，表的键为某种排列的位数组，而表的值则是相应位数组中，值为1的二进制位的数量。  
+创建了这种表之后，我们就可以根据输入的位数组进行查表，在无须对位数组的每个位进行检查的情况下，直接知道这个位数组包含了多少个值为1的二进制位。
+
+下表可以快速检查8位长的位数组包含多少个1：
+
+键（位数组） | 值为1的位数量
+ :----: | :----:
+0000 0000 | 0
+0000 0001 | 1
+0000 0010 | 1
+0000 0011 | 2
+0000 0100 | 1
+0000 0101 | 2
+0000 0110 | 2
+0000 0111 | 3
+…… | ……
+1111 1110 | 7
+1111 1111 | 8
+
+执行一次查表操作，就可以检查8个二进制位，和遍历算法相比，查表法的效率提升了8倍。  
+以100MB=800000000bit（八亿位）来计算，使用查表法处理长度为100MB的位数组需要执行查表操作一亿次。而对于500MB长的位数组来说，使用查表法处理该位数组需要执行五亿次查表操作。
+
+- 如果将表键的大小扩展为16位，那么每次查表就可以处理16个二进制位，检查100MB长的二进制位只需要五千万次查表，检查500MB长的二进制位只需要两亿五千万次查表。
+- 如果将表键的大小扩展为32位，那么每次查表就可以处理32个二进制位，检查100MB长的二进制位只需要两千五百万次查表，检查500MB长的二进制位只需要一亿两千五百万次查表。
+
+###### 查表法的实际效果会受到内存和缓存两方面因素的限制
+- 因为查表法是典型的空间换时间策略，算法在计算方面节约的时间是通过花费额外的内存换取而来的，节约的时间越多，花费的内存就越大。对于我们这里讨论的统计二进制位的问题来说，创建键长为8位的表仅需数百个字节，创建键长为16位的表也仅需数百个KB，但创建键长为32位的表却需要十多个GB。在实际中，服务器只可能接受数百个字节或者数百KB的内存消耗。
+- 除了内存大小的问题之外，查表法的效果还会受到CPU缓存的限制：对于固定大小的CPU缓存来说，创建的表格越大，CPU缓存所能保存的内容相比整个表格的比例就越少，查表时出现缓存不命中（cache miss）的情况就会越高，缓存的换入和换出操作就会越频繁，最终影响查表法的实际效率。
+
+查表法是一种比遍历算法更好的统计办法，但受限于查表法带来的内存压力，以及缓存不命中可能带来的影响，只能考虑创建键长为8位或者键长为16位的表，而这两种表带来的效率提升，对于处理非常长的位数组来说仍然远远不够。
+
+#### 二进制位统计算法：variable-precision SWAR算法
+BITCOUNT命令要解决的问题——统计一个位数组中非0二进制位的数量，在数学上被称为“计算汉明重量（Hamming Weight）”。  
+因为汉明重量经常被用于信息论、编码理论和密码学，所以研究人员针对计算汉明重量开发了多种不同的算法，一些处理器甚至直接带有计算汉明重量的指令，而对于不具备这种特殊指令的普通处理器来说，目前已知效率最好的通用算法为variable-precision SWAR算法，该算法通过一系列位移和位运算操作，可以在常数时间内计算多个字节的汉明重量，并且不需要使用任何额外的内存。
+
+以下是一个处理32位长度位数组的variable-precision SWAR算法的实现：
+
+```c
+uint32_t swar(uint32_t i) {
+    // 步骤1 
+    i = (i & 0x55555555) + ((i >> 1) & 0x55555555);
+    // 步骤2 
+    i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+    // 步骤3 
+    i = (i & 0x0F0F0F0F) + ((i >> 4) & 0x0F0F0F0F);
+    // 步骤4 
+    i = (i*(0x01010101) >> 24);
+    return i;
+}
+```
+
+1. 步骤1计算出的值i的二进制表示可以按每两个二进制位为一组进行分组，各组的十进制表示就是该组的汉明重量。
+2. 步骤2计算出的值i的二进制表示可以按每四个二进制位为一组进行分组，各组的十进制表示就是该组的汉明重量。
+3. 步骤3计算出的值i的二进制表示可以按每八个二进制位为一组进行分组，各组的十进制表示就是该组的汉明重量。
+4. 步骤4的i*0x01010101语句计算出bitarray的汉明重量并记录在二进制位的最高八位，而>>24语句则通过右移运算，将bitarray的汉明重量移动到最低八位，得出的结果就是bitarray的汉明重量。
+
+举个例子，对于调用swar（0x3A70F21B），程序在第一步将计算出值0x2560A116，这个值的每两个二进制位的十进制表示记录了0x3A70F21B每两个二进制位的汉明重量，如下图：  
+![Hamming_Weight_1](../images/redis/2024-03-26_Hamming_Weight_1.png)
+
+程序在第二步将计算出值0x22304113，这个值的每四个二进制位的十进制表示记录了0x3A70F21B每四个二进制位的汉明重量，如下图：  
+![Hamming_Weight_2](../images/redis/2024-03-26_Hamming_Weight_2.png)
+
+程序在第三步将计算出值0x4030504，这个值的每八个二进制位的十进制表示记录了0x3A70F21B每八个二进制位的汉明重量，如下图：  
+![Hamming_Weight_3](../images/redis/2024-03-26_Hamming_Weight_3.png)
+
+在第四步，程序首先计算0x4030504\*0x01010101=0x100c0904，将汉明重量聚集到二进制位的最高八位，如下图：  
+![Hamming_Weight_4](../images/redis/2024-03-26_Hamming_Weight_4.png)
+
+之后程序计算0x100c0904 >> 24，将汉明重量移动到低八位，最终得出值0x10，也即是十进制值16，这个值就是0x3A70F21B的汉明重量，如下图：  
+![Hamming_Weight_5](../images/redis/2024-03-26_Hamming_Weight_5.png)
+
+swar函数每次执行可以计算32个二进制位的汉明重量，它比之前介绍的遍历算法要快32倍，比键长为8位的查表法快4倍，比键长为16位的查表法快2倍，并且因为swar函数是单纯的计算操作，所以它无须像查表法那样，使用额外的内存。
+
+因为swar函数是一个常数复杂度的操作，所以可以按照自己的需要，在一次循环中多次执行swar，从而按倍数提升计算汉明重量的效率：
+
+    如果我们在一次循环中调用两次swar函数，那么计算汉明重量的效率就从之前的一次循环计算32位提升到了一次循环计算64位。
+    如果我们在一次循环中调用四次swar函数，那么一次循环就可以计算128个二进制位的汉明重量，这比每次循环只调用一次swar函数要快四倍！
+
+在一个循环里执行多个swar调用这种优化方式是有极限的：一旦循环中处理的位数组的大小超过了缓存的大小，这种优化的效果就会降低并最终消失。
+
+#### Redis的二进制位统计算法实现
+BITCOUNT命令的实现用到了查表和variable-precisionSWAR两种算法：
+- 查表算法使用键长为8位的表，表中记录了从0000 0000到1111 1111在内的所有二进制位的汉明重量。
+- 至于variable-precision SWAR算法方面，BITCOUNT命令在每次循环中载入128个二进制位，然后调用四次32位variable-precision SWAR算法来计算这128个二进制位的汉明重量。
+
+在执行BITCOUNT命令时，程序会根据未处理的二进制位的数量来决定使用那种算法：
+- 如果未处理的二进制位的数量大于等于128位，那么程序使用variable-precision SWAR算法来计算二进制位的汉明重量。
+- 如果未处理的二进制位的数量小于128位，那么程序使用查表算法来计算二进制位的汉明重量。
+    
+BITCOUNT实现的算法复杂度为O(n)，其中n为输入二进制位的数量。
+
+可以用以下公式来计算BITCOUNT命令在处理长度为n的二进制位输入时，命令中的两个循环需要执行的次数：
+
+    第一个循环的执行次数可以用公式loop₁ = n÷128 计算得出。
+    第二个循环的执行次数可以用公式loop₂ = n mod 128 计算得出。
+
+以100MB=800000000bit来计算，BITCOUNT命令处理一个100MB长的位数组共需要执行第一个循环六百二十五万次，第二个循环零次。以500MB=4000000000bit来计算，BITCOUNT命令处理一个500MB长的位数组共需要执行第一个循环三千一百二十五万次，第二个循环零次。  
+通过使用更好的算法，可以将计算100MB和500MB长的二进制位所需的循环次数从最开始使用遍历算法时的数亿甚至数十亿次减少到了数百万次和数千万次。
+
+### BITOP
+因为C语言直接支持对字节执行逻辑与（&）、逻辑或（|）、逻辑异或（^）和逻辑非（~）操作，所以BITOP命令的AND、OR、XOR和NOT四个操作都是直接基于这些逻辑操作实现的：
+- 在执行BITOP AND命令时，程序用&操作计算出所有输入二进制位的逻辑与结果，然后保存在指定的键上面。
+- 在执行BITOP OR命令时，程序用|操作计算出所有输入二进制位的逻辑或结果，然后保存在指定的键上面。
+- 在执行BITOP XOR命令时，程序用^操作计算出所有输入二进制位的逻辑异或结果，然后保存在指定的键上面。
+- 在执行BITOP NOT命令时，程序用~操作计算出输入二进制位的逻辑非结果，然后保存在指定的键上面。
+
+因为BITOP AND、BITOP OR、BITOP XOR三个命令可以接受多个位数组作为输入，程序需要遍历输入的每个位数组的每个字节来进行计算，所以这些命令的复杂度为O(n²)；与此相反，因为BITOP NOT命令只接受一个位数组输入，所以它的复杂度为O(n)。
 
 
 ## 慢查询日志

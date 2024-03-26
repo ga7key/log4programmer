@@ -1221,6 +1221,116 @@ BITCOUNT实现的算法复杂度为O(n)，其中n为输入二进制位的数量�
 
 
 ## 慢查询日志
+Redis的慢查询日志功能用于记录执行时间超过给定时长的命令请求，用户可以通过这个功能产生的日志来监视和优化查询速度。
+
+- SLOWLOG GET命令可以查看慢查询日志。
+- SLOWLOG LEN命令可以查看慢查询日志数量。
+- SLOWLOG RESET命令可以清除所有慢查询日志。
+
+服务器配置有两个和慢查询日志相关的选项：
+- slowlog-log-slower-than选项指定执行时间超过多少微秒（1秒等于1 000 000微秒）的命令请求会被记录到日志上。
+- slowlog-max-len选项指定服务器最多保存多少条慢查询日志。
+
+服务器使用先进先出的方式保存多条慢查询日志，当服务器存储的慢查询日志数量等于slowlog-max-len选项的值时，服务器在添加一条新的慢查询日志之前，会先将最旧的一条慢查询日志删除。
+
+举个例子，首先用CONFIG SET命令将slowlog-log-slower-than选项的值设为0微秒，这样Redis服务器执行的任何命令都会被记录到慢查询日志中，接着将slowlog-max-len选项的值设为5，让服务器最多只保存5条慢查询日志：
+```bash
+redis> CONFIG SET slowlog-log-slower-than 0
+OK
+redis> CONFIG SET slowlog-max-len 5
+OK
+```
+
+然后在客户端发送几条命令请求，使用SLOWLOG GET命令查看服务器所保存的慢查询日志：
+```bash
+redis> SLOWLOG GET
+1) 1) (integer) 4               # 日志的唯一标识符（uid） 
+   2) (integer) 1378781447      # 命令执行时的UNIX时间戳
+   3) (integer) 13              # 命令执行的时长，以微秒计算
+   4) 1) "SET"                  # 命令以及命令参数
+      2) "database"
+      3) "Redis"
+2) 1) (integer) 3
+   2) (integer) 1378781439
+   3) (integer) 10
+   4) 1) "SET"
+      2) "number"
+      3) "10086"
+3) 1) (integer) 2
+   2) (integer) 1378781436
+   3) (integer) 18
+   4) 1) "SET"
+      2) "msg"
+      3) "hello world"
+4) 1) (integer) 1
+   2) (integer) 1378781425
+   3) (integer) 11
+   4) 1) "CONFIG"
+      2) "SET"
+      3) "slowlog-max-len"
+      4) "5"
+5) 1) (integer) 0
+   2) (integer) 1378781415
+   3) (integer) 53
+   4) 1) "CONFIG"
+      2) "SET"
+      3) "slowlog-log-slower-than"
+      4) "0"
+```
+
+如果这时再执行一条SLOWLOG GET命令，上一次执行的SLOWLOG GET命令已经被记录到了慢查询日志中，而最旧的、ID为0的慢查询日志已经被删除，服务器的慢查询日志数量仍然为5条。
+
+###### 慢查询记录的结构
+服务器状态中包含了几个和慢查询日志功能有关的属性：
+```c
+struct redisServer {
+    // ...
+    // 下一条慢查询日志的ID
+    long long slowlog_entry_id;
+    // 保存了所有慢查询日志的链表
+    list *slowlog;
+    // 服务器配置slowlog-log-slower-than选项的值
+    long long slowlog_log_slower_than;
+    // 服务器配置slowlog-max-len选项的值
+    unsigned long slowlog_max_len;
+    // ...
+};
+```
+
+slowlog_entry_id属性的初始值为0，每当创建一条新的慢查询日志时，这个属性的值就会用作新日志的id值，之后程序会对这个属性的值增一。
+
+slowlog链表保存了服务器中的所有慢查询日志，链表中的每个节点都保存了一个slowlogEntry结构，每个slowlogEntry结构代表一条慢查询日志：
+```c
+typedef struct slowlogEntry {
+    // 唯一标识符
+    long long id;
+    // 命令执行时的时间，格式为UNIX时间戳
+    time_t time;
+    // 执行命令消耗的时间，以微秒为单位
+    long long duration;
+    // 命令与命令参数
+    robj **argv;
+    // 命令与命令参数的数量
+    int argc;
+} slowlogEntry;
+```
+
+redisServer的slowlog结构示例：  
+![redisServer_slowlog](../images/redis/2024-03-26_redisServer_slowlog.png)
+
+▶ slowlog_entry_id的值为6，表示服务器下条慢查询日志的id值将为6。  
+▶ slowlog链表包含了id为5至1的慢查询日志，最新的5号日志排在链表的表头，而最旧的1号日志排在链表的表尾，这表明slowlog链表是使用插入到表头的方式来添加新日志的。  
+▶ slowlog_log_slower_than记录了服务器配置slowlog-log-slower-than选项的值0，表示任何执行时间超过0微秒的命令都会被慢查询日志记录。  
+▶ slowlog-max-len属性记录了服务器配置slowlog-max-len选项的值5，表示服务器最多储存五条慢查询日志。
+
+###### 添加新日志
+在每次执行命令的之前和之后，程序都会记录微秒格式的当前UNIX时间戳，这两个时间戳之间的差就是服务器执行命令所耗费的时长，服务器会将这个时长作为参数之一传给slowlogPushEntryIfNeeded函数，而slowlogPushEntryIfNeeded函数则负责检查是否需要为这次执行的命令创建慢查询日志。
+
+slowlogPushEntryIfNeeded函数的作用有两个：
+1. 检查命令的执行时长是否超过slowlog-log-slower-than选项所设置的时间，如果是的话，就为命令创建一个新的日志，并将新日志添加到slowlog链表的表头。
+2. 检查慢查询日志的长度是否超过slowlog-max-len选项所设置的长度，如果是的话，那么将多出来的日志从slowlog链表中删除掉。
+
+slowlogCreateEntry函数：该函数根据传入的参数，创建一个新的慢查询日志，并将redisServer.slowlog_entry_id的值增1。
 
 
 ## 监视器

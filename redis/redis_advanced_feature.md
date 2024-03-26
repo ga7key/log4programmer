@@ -697,6 +697,270 @@ EVAL <script> <numkeys> [key ...] [arg ...]
 <span style="color: red;font-weight: bold;">Tips</span>：《Lua 5.1 Reference Manual》对Lua语言的语法和标准库进行了很好的介绍：http://www.lua.org/manual/5.1/manual.html
 
 ## 排序
+Redis的SORT命令可以对列表键、集合键或者有序集合键的值进行排序。
+
+#### SORT \<key>
+```
+SORT <key>
+```
+可以对一个键key的值进行排序。
+
+以下示例展示了如何使用SORT命令对一个包含三个数字值的列表键进行排序：
+```
+redis> RPUSH numbers 3 1 2
+(integer) 3
+redis> SORT numbers
+1) "1"
+2) "2"
+3) "3"
+```
+服务器执行SORT numbers命令的详细步骤如下：
+1. 创建一个和numbers列表长度相同的数组，该数组的每个项都是一个redis.h/redisSortObject结构。
+2. 遍历数组，将各个数组项的obj指针分别指向numbers列表的各个项，构成obj指针和列表项之间的一对一关系。
+3. 遍历数组，将各个obj指针所指向的列表项转换成一个double类型的浮点数，并将这个浮点数保存在相应数组项的u.score属性里面。
+4. 根据数组项u.score属性的值，对数组进行数字值排序，排序后的数组项按u.score属性的值从小到大排列。
+5. 遍历数组，将各个数组项的obj指针所指向的列表项作为排序结果返回给客户端，程序首先访问数组的索引0，返回u.score值为1.0的列表项"1"；然后访问数组的索引1，返回u.score值为2.0的列表项"2"；最后访问数组的索引2，返回u.score值为3.0的列表项"3"。
+
+![array_sorted](../images/redis/2024-03-26_array_sorted.png)
+
+以下是redisSortObject结构的完整定义：
+```
+typedef struct _redisSortObject {
+    // 被排序键的值
+    robj *obj;
+    // 权重
+    union {
+        // 排序数字值时使用
+        double score;
+        // 排序带有BY选项的字符串值时使用
+        robj *cmpobj;
+    } u;
+} redisSortObject;
+```
+SORT命令为每个被排序的键都创建一个与键长度相同的数组，数组的每个项都是一个redisSortObject结构，根据SORT命令使用的选项不同，程序使用redisSortObject结构的方式也不同。
+
+#### ALPHA
+通过使用ALPHA选项，SORT命令可以对包含字符串值的键进行排序：
+```
+SORT <key> ALPHA
+```
+
+以下命令展示了如何使用SORT命令对一个包含三个字符串值的集合键进行排序：
+```
+redis> SADD fruits apple banana cherry
+(integer) 3
+# 元素在集合中是乱序存放的
+redis> SMEMBERS fruits
+1) "apple"
+2) "cherry"
+3) "banana"
+# 对fruits键进行字符串排序
+redis> SORT fruits ALPHA
+1) "apple"
+2) "banana"
+3) "cherry"
+```
+
+服务器执行SORT fruits ALPHA命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于fruits集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向fruits集合的各个元素。
+3. 根据obj指针所指向的集合元素，对数组进行字符串排序，排序后的数组项按集合元素的字符串值从小到大排列：因为"apple"、"banana"、"cherry"三个字符串的大小顺序为"apple"<"banana"<"cherry"，所以排序后数组的第一项指向"apple"元素，第二项指向"banana"元素，第三项指向"cherry"元素。
+4. 遍历数组，依次将数组项的obj指针所指向的元素返回给客户端。
+
+#### ASC和DESC
+在默认情况下，SORT命令执行升序排序，排序后的结果按值的大小从小到大排列，以下两个命令是完全等价的：
+```
+SORT <key>
+SORT <key> ASC
+```
+
+在执行SORT命令时使用DESC选项，可以让命令执行降序排序，让排序后的结果按值的大小从大到小排列：
+```
+SORT <key> DESC
+```
+
+升序排序和降序排序都由相同的快速排序算法执行。
+
+#### BY
+在默认情况下，SORT命令使用被排序键包含的元素作为排序的权重，元素本身决定了元素在排序之后所处的位置。  
+通过使用BY选项，SORT命令可以指定某些字符串键，或者某个哈希键所包含的某些域（field）来作为元素的权重，对一个键进行排序。
+```
+redis> MSET apple-price 8 banana-price 5.5 cherry-price 7
+OK
+redis> SORT fruits BY *-price
+1) "banana"
+2) "cherry"
+3) "apple"
+```
+
+服务器执行SORT fruits BY \*-price命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于fruits集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向fruits集合的各个元素。
+3. 遍历数组，根据各个数组项的obj指针所指向的集合元素，以及BY选项所给定的模式 \*-price，查找相应的权重键：
+
+    对于"apple"元素，查找程序返回权重键"apple-price"。  
+    对于"banana"元素，查找程序返回权重键"banana-price"。  
+    对于"cherry"元素，查找程序返回权重键"cherry-price"。
+
+4. 将各个权重键的值转换成一个double类型的浮点数，然后保存在相应数组项的u.score属性里面：
+
+    "apple"元素的权重键"apple-price"的值转换之后为8.0。  
+    "banana"元素的权重键"banana-price"的值转换之后为5.5。  
+    "cherry"元素的权重键"cherry-price"的值转换之后为7.0。
+
+5. 以数组项u.score属性的值为权重，对数组进行排序，得到一个按u.score属性的值从小到大排序的数组：
+
+    权重为5.5的"banana"元素位于数组的索引0位置上。  
+    权重为7.0的"cherry"元素位于数组的索引1位置上。  
+    权重为8.0的"apple"元素位于数组的索引2位置上。
+
+6. 遍历数组，依次将数组项的obj指针所指向的集合元素返回给客户端。
+
+##### 带有ALPHA选项的BY
+BY选项默认假设权重键保存的值为数字值，如果权重键保存的是字符串值的话，那么就需要在使用BY选项的同时，配合使用ALPHA选项。
+```
+redis> SADD fruits "apple" "banana" "cherry"
+(integer) 3
+redis> MSET apple-id "FRUIT-25" banana-id "FRUIT-79" cherry-id "FRUIT-13"
+OK
+redis> SORT fruits BY *-id ALPHA
+1)"cherry"
+2)"apple"
+3)"banana"
+```
+
+服务器执行SORT fruits BY \*-id ALPHA命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于fruits集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向fruits集合的各个元素。
+3. 遍历数组，根据各个数组项的obj指针所指向的集合元素，以及BY选项所给定的模式 \*-id，查找相应的权重键：
+
+    对于"apple"元素，查找程序返回权重键"apple-id"。  
+    对于"banana"元素，查找程序返回权重键"banana-id"。  
+    对于"cherry"元素，查找程序返回权重键"cherry-id"。
+
+4. 将各个数组项的u.cmpobj指针分别指向相应的权重键（一个字符串对象）。
+5. 以各个数组项的权重键的值为权重，对数组执行字符串排序：
+
+    权重为"FRUIT-13"的"cherry"元素位于数组的索引0位置上。  
+    权重为"FRUIT-25"的"apple"元素位于数组的索引1位置上。  
+    权重为"FRUIT-79"的"banana"元素位于数组的索引2位置上。
+
+6. 遍历数组，依次将数组项的obj指针所指向的集合元素返回给客户端。
+
+#### LIMIT
+在默认情况下，SORT命令总会将排序后的所有元素都返回给客户端。  
+通过LIMIT选项，我们可以让SORT命令只返回其中一部分已排序的元素。  
+LIMIT选项的格式为LIMIT \<offset> \<count>：
+- offset参数表示要跳过的已排序元素数量。
+- count参数表示跳过给定数量的已排序元素之后，要返回的已排序元素数量。
+
+服务器执行 SORT alphabet ALPHA LIMIT 0 4 命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于alphabet集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向alphabet集合的各个元素。
+3. 根据obj指针所指向的集合元素，对数组进行字符串排序。
+4. 根据选项LIMIT 0 4，将指针移动到数组的索引0上面，然后依次访问array[0]、array[1]、array[2]、array[3]这4个数组项，并将数组项的obj指针所指向的4个元素返回给客户端。
+
+#### GET
+在默认情况下，SORT命令在对键进行排序之后，总是返回被排序键本身所包含的元素。  
+通过使用GET选项，我们可以让SORT命令在对键进行排序之后，根据被排序的元素，以及GET选项所指定的模式，查找并返回某些键的值。
+```
+# 设置peter、jack、tom的全名
+redis> SET peter-name "Peter White"
+OK
+redis> SET jack-name "Jack Snow"
+OK
+redis> SET tom-name "Tom Smith"
+OK
+# SORT命令首先对students集合进行排序，得到排序结果
+# 然后根据这些结果，获取并返回键jack-name、peter-name和tom-name的值
+redis> SORT students ALPHA GET *-name
+1) "Jack Snow"
+2) "Peter White"
+3) "Tom Smith"
+```
+
+服务器执行SORT students ALPHA GET \*-name命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于students集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向students集合的各个元素。
+3. 根据obj指针所指向的集合元素，对数组进行字符串排序：
+
+    被排序到数组索引0位置的是"jack"元素。  
+    被排序到数组索引1位置的是"peter"元素。  
+    被排序到数组索引2位置的是"tom"元素。
+
+4. 遍历数组，根据数组项obj指针所指向的集合元素，以及GET选项所给定的 \*-name模式，查找相应的键：
+
+    对于"jack"元素和 \*-name模式，查找程序返回键jack-name。  
+    对于"peter"元素和 \*-name模式，查找程序返回键peter-name。  
+    对于"tom"元素和 \*-name模式，查找程序返回键tom-name。
+
+5. 遍历查找程序返回的三个键，并向客户端返回它们的值：
+
+    首先返回的是jack-name键的值"Jack Snow"。  
+    然后返回的是peter-name键的值"Peter White"。  
+    最后返回的是tom-name键的值"Tom Smith"。
+
+因为一个SORT命令可以带有多个GET选项，所以随着GET选项的增多，命令要执行的查找操作也会增多。
+```
+# 排序students集合，并获取相应的全名和出生日期
+redis> SORT students ALPHA GET *-name GET *-birth
+```
+
+#### STORE
+在默认情况下，SORT命令只向客户端返回排序结果，而不保存排序结果。  
+通过使用STORE选项，我们可以将排序结果保存在指定的键里面，并在有需要时重用这个排序结果：
+```
+redis> SORT students ALPHA STORE sorted_students
+(integer) 3
+redis> LRANGE sorted_students 0-1
+1) "jack"
+2) "peter"
+3) "tom"
+```
+
+服务器执行SORT students ALPHA STORE sorted_students命令的详细步骤如下：
+1. 创建一个redisSortObject结构数组，数组的长度等于students集合的大小。
+2. 遍历数组，将各个数组项的obj指针分别指向students集合的各个元素。
+3. 根据obj指针所指向的集合元素，对数组进行字符串排序：
+
+    被排序到数组索引0位置的是"jack"元素。  
+    被排序到数组索引1位置的是"peter"元素。  
+    被排序到数组索引2位置的是"tom"元素。
+
+4. 检查sorted_students键是否存在，如果存在的话，那么删除该键。
+5. 设置sorted_students为空白的列表键。
+6. 遍历数组，将排序后的三个元素"jack"、"peter"和"tom"依次推入sorted_students列表的末尾，相当于执行命令RPUSH sorted_students "jack"、"peter"、"tom"。
+7. 遍历数组，向客户端返回"jack"、"peter"、"tom"三个元素。
+
+#### 选项的执行顺序
+如果按照选项来划分的话，一个SORT命令的执行过程可以分为以下步骤：
+1. 排序：在这一步，命令会使用ALPHA、ASC或DESC、BY这几个选项，对输入键进行排序，并得到一个排序结果集。
+2. 限制排序结果集的长度：在这一步，命令会使用LIMIT选项，对排序结果集的长度进行限制，只有LIMIT选项指定的那部分元素会被保留在排序结果集中。
+3. 获取外部键：在这一步，命令会使用GET选项，根据排序结果集中的元素，以及GET选项指定的模式，查找并获取指定键的值，并用这些值来作为新的排序结果集。
+4. 保存排序结果集：在这一步，命令会使用STORE选项，将排序结果集保存到指定的键上面去。
+5. 向客户端返回排序结果集：在最后这一步，命令遍历排序结果集，并依次向客户端返回排序结果集中的元素。
+
+用客户端执行下面的SORT命令的顺序：
+```
+SORT <key> ALPHA DESC BY <by-pattern> LIMIT <offset> <count> GET <get-pattern> STORE <store_key>
+# 命令会首先执行
+SORT <key> ALPHA DESC BY <by-pattern>
+# 接着执行
+LIMIT <offset> <count>
+# 然后执行
+GET <get-pattern>
+# 之后执行
+STORE <store_key>
+```
+
+#### 选项的摆放顺序
+调用SORT命令时，除了GET选项之外，改变选项的摆放顺序并不会影响SORT命令执行这些选项的顺序。  
+如果命令包含了多个GET选项，那么在调整选项的位置时，必须保证多个GET选项的摆放顺序不变，这才可以让排序结果集保持不变。
+```
+# 这两个命令产生的排序结果集不同
+SORT <key> STORE <store_key> GET <pattern-a> GET <pattern-b>
+SORT <key> STORE <store_key> GET <pattern-b> GET <pattern-a>
+```
 
 
 ## 二进制位数组

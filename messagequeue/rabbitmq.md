@@ -110,7 +110,7 @@ Channel 提供了一种在单个TCP连接上执行多路复用的方法，这意
 
 - ##### exchangeDeclare
 这个方法的返回值是Exchange.DeclareOK，用来标识成功声明了一个交换器。  
-```
+```java
 Exchange.DeclareOk exchangeDeclare(String exchange, String type, boolean durable, boolean autoDelete, 
                                 boolean internal, Map<String, Object> arguments) throws IOException;
 ```
@@ -122,7 +122,7 @@ Exchange.DeclareOk exchangeDeclare(String exchange, String type, boolean durable
   argument：其他一些结构化参数，比如alternate-exchange
 
 exchangeDeclare 的其他重载方法如下：
-```
+```java
 Exchange.DeclareOk exchangeDeclare(String exchange, String type) throws IOException;
 
 Exchange.DeclareOk exchangeDeclare(String exchange, String type, boolean durable) throws IOException;
@@ -132,7 +132,7 @@ Exchange.DeclareOk exchangeDeclare(String exchange, String type, boolean durable
 <span style="color: red;">tips</span>：第二个参数String type 可以换成BuiltInExchangeType type
 
 **其他创建交换器的方法**
-```
+```java
 // 客户端声明了一个交换器之后，不需要服务器任何返回值（如果服务器还并未完成交换器的创建，紧接着使用会发生异常，所以不建议使用该方法）
 void exchangeDeclareNoWait(String exchange, String type, boolean durable, boolean autoDelete,
                             boolean internal, Map<String, Object> arguments) throws IOException;
@@ -142,7 +142,7 @@ Exchange.DeclareOk exchangeDeclarePassive(String name) throws IOException;
 ```
 
 **删除交换器的方法**
-```
+```java
 Exchange.DeleteOk exchangeDelete(String exchange) throws IOException;
 
 void exchangeDeleteNoWait(String exchange, boolean ifUnused) throws IOException;
@@ -155,7 +155,7 @@ ifUnused：用来设置是否在交换器没有被使用的情况下删除。如
 - ##### queueDeclare
 声明一个队列。
 
-```
+```java
 // 创建一个由RabbitMQ 命名的（类似这种amq.gen-LhQz1gv3GhDOv8PIDabOXA 名称，这种队列也称之为匿名队列）、排他的、自动删除的、非持久化的队列
 Queue.DeclareOk queueDeclare() throws IOException;
 
@@ -170,7 +170,7 @@ arguments：设置队列的其他一些参数，如x-message-ttl、x-expires、x
 <span style="color: red;">tips：生产者和消费者都能够使用queueDeclare 来声明一个队列，但是如果消费者在同一个信道上订阅了另一个队列，就无法再声明队列了。必须先取消订阅，然后将信道置为“传输”模式，之后才能声明队列。</span>
 
 **其他创建队列的方法**
-```
+```java
 // 客户端声明了一个队列之后，不需要服务器任何返回值（如果服务器还并未完成队列的创建，紧接着使用会发生异常，所以不建议使用该方法）
 void queueDeclareNoWait(String queue, boolean durable, boolean exclusive,
                         boolean autoDelete, Map<String, Object> arguments) throws IOException;
@@ -180,7 +180,7 @@ Queue.DeclareOk queueDeclarePassive(String queue) throws IOException;
 ```
 
 **删除队列的方法**
-```
+```java
 Queue.DeleteOk queueDelete(String queue) throws IOException;
 
 Queue.DeleteOk queueDelete(String queue, boolean ifUnused, boolean ifEmpty) throws IOException;
@@ -191,7 +191,7 @@ void queueDeleteNoWait(String queue, boolean ifUnused, boolean ifEmpty) throws I
 ifUnused：用来设置是否在队列没有被使用的情况下删除。如果isUnused 设置为true，则只有在此队列没有被使用的情况下才会被删除；如果设置false，则无论如何这个队列都要被删除
 ifEmpty：设置为true 表示在队列为空（队列里面没有任何消息堆积）的情况下才能够删除
 
-```
+```java
 // 清空队列中的内容，而不删除队列本身
 Queue.PurgeOk queuePurge(String queue) throws IOException;
 ```
@@ -199,7 +199,7 @@ Queue.PurgeOk queuePurge(String queue) throws IOException;
 - ##### queueBind
 将队列和交换器绑定。  
 
-```
+```java
 Queue.BindOk queueBind(String queue, String exchange, String routingKey) throws IOException;
 
 Queue.BindOk queueBind(String queue, String exchange, String routingKey, Map<String, Object> arguments) throws IOException;
@@ -212,7 +212,7 @@ routingKey：用来绑定队列和交换器的路由键
 argument：定义绑定的一些参数  
 
 **队列和交换器解绑**
-```
+```java
 Queue.UnbindOk queueUnbind(String queue, String exchange, String routingKey) throws IOException;
 
 Queue.UnbindOk queueUnbind(String queue, String exchange, String routingKey, Map<String, Object> arguments) throws IOException;
@@ -221,7 +221,7 @@ Queue.UnbindOk queueUnbind(String queue, String exchange, String routingKey, Map
 - ##### exchangeBind
 将交换器与交换器绑定。
 
-```
+```java
 Exchange.BindOk exchangeBind(String destination, String source, String routingKey) throws IOException;
 
 Exchange.BindOk exchangeBind(String destination, String source, String routingKey, Map<String, Object> arguments) throws IOException;
@@ -234,7 +234,7 @@ routingKey：用来绑定两个交换器的路由键
 argument：定义绑定的一些参数  
 
 #### 关闭连接
-```
+```java
 // 显式地关闭Channel 是个好习惯，但这不是必须的，在Connection 关闭的时候，Channel 也会自动关闭
 channel.close();
 connection.close();
@@ -246,7 +246,7 @@ Closing：正在关闭状态。当前对象被显式地通知调用关闭方法�
 Closed：已经关闭状态。当前对象已经接收到所有的内部对象已完成关闭动作的通知，并且其也关闭了自身。
 
 在Connection 和Channel 中与关闭相关的方法：
-```
+```java
 // 当Connection 或者Channel 的状态转变为Closed 的时候会调用ShutdownListener。
 // 如果将一个ShutdownListener 注册到一个已经处于Closed状态的对象（这里特指Connection 和Channel 对象）时，会立刻调用ShutdownListener
 addShutdownListener(ShutdownListener listener)  
@@ -263,7 +263,7 @@ close(int closeCode, String closeMessage)
 ```
 
 当触发ShutdownListener 的时候，可以获取到关闭的原因（ShutdownSignalException）
-```
+```java
 connection.addShutdownListener(new ShutdownListener() {
     public void shutdownCompleted(ShutdownSignalException cause) {
         // isHardError 方法可以知道是Connection 的还是Channel 的错误
@@ -286,7 +286,7 @@ connection.addShutdownListener(new ShutdownListener() {
 ### 发送消息
 发送一个消息，可以使用Channel 类的basicPublish 方法  
 
-```
+```java
 void basicPublish(String exchange, String routingKey, BasicProperties props, byte[] body) throws IOException;
 
 void basicPublish(String exchange, String routingKey, boolean mandatory, BasicProperties props, byte[] body) throws IOException;
@@ -302,19 +302,19 @@ mandatory：当mandatory 参数设为true 时，交换器无法根据自身的�
 immediate：当immediate 参数设为true 时，如果交换器在将消息路由到队列时发现队列上并不存在任何消费者，那么这条消息将不会存入队列中。当与路由键匹配的所有队列都没有消费者时，该消息会通过Basic.Return 返回至生产者。<span style="color: red;">RabbitMQ 3.0 版本开始去掉了对immediate 参数的支持，对此RabbitMQ 官方解释是：immediate 参数会影响镜像队列的性能，增加了代码复杂性，建议采用TTL 和DLX 的方法替代</span>  
 
 ##### 当mandatory 为 true 时，添加ReturnListener 监听器来接收返回的消息
-```
-    channel.basicPublish(EXCHANGE_NAME, "", true, MessageProperties.PERSISTENT_TEXT_PLAIN, "测试消息".getBytes());
-    channel.addReturnListener(new ReturnListener() {
-        public void handleReturn(int replyCode, String replyText, String exchange, String routingKey, 
-                                AMQP.BasicProperties basicProperties, byte[] body) throws IOException {
-            String message = new String(body);
-            System.out.println("Basic.Return 返回的结果是："+message);
-        }
-    });
+```java
+channel.basicPublish(EXCHANGE_NAME, "", true, MessageProperties.PERSISTENT_TEXT_PLAIN, "测试消息".getBytes());
+channel.addReturnListener(new ReturnListener() {
+    public void handleReturn(int replyCode, String replyText, String exchange, String routingKey, 
+                            AMQP.BasicProperties basicProperties, byte[] body) throws IOException {
+        String message = new String(body);
+        System.out.println("Basic.Return 返回的结果是："+message);
+    }
+});
 ```
 
 ##### BasicProperties props 示例
-```
+```java
 // MessageProperties.PERSISTENT_TEXT_PLAIN 相当于设置投递模式（delivery mode）为2，即消息会被持久化，
 // 设置优先级（priority）为1，设置content-type为“text/plain”
 channel.basicPublish(exchangeName, routingKey, mandatory, MessageProperties.PERSISTENT_TEXT_PLAIN, messageBodyBytes);
@@ -337,7 +337,7 @@ RabbitMQ 的**消费模式**分两种：推（Push）模式和拉（Pull）模�
 接收消息一般通过实现Consumer 接口或者继承DefaultConsumer 类来实现。  
 
 Channel 类中basicConsume 方法有如下几种形式：
-```
+```java
 String basicConsume(String queue, Consumer callback) throws IOException;
 
 String basicConsume(String queue, boolean autoAck, Consumer callback) throws IOException;
@@ -358,7 +358,7 @@ arguments：设置消费者的其他参数
 callback：设置消费者的回调函数。用来处理RabbitMQ 推送过来的消息，比如DefaultConsumer，使用时需要客户端重写（override）其中的方法
 
 callback 中被重写的方法：
-```
+```java
 // 处理推送的消息
 void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException;
 
@@ -379,7 +379,7 @@ void handleRecoverOk(String consumerTag);
 ```
 
 通过channel.basicCancel 方法可以显式地取消一个消费者的订阅
-```
+```java
 // 相当于首先触发handleConsumerOk 方法，之后触发handleDelivery方法，最后触发handleCancelOk 方法
 channel.basicCancel(consumerTag);
 ```
@@ -397,7 +397,7 @@ RabbitMQ 4.x 版本开始将QueueingConsumer 标记为@Deprecated，因为它有
 #### 拉模式
 通过channel.basicGet 方法可以单条地获取消息，其返回值是GetRespone  
 
-```
+```java
 GetResponse basicGet(String queue, boolean autoAck) throws IOException;
 ```
 > queue：队列的名称  
@@ -416,7 +416,7 @@ Alternate Exchange，简称AE
 如果备份交换器没有任何匹配的队列，客户端和RabbitMQ 服务端都不会有异常出现，此时消息会丢失。  
 如果备份交换器和mandatory 参数一起使用，那么mandatory 参数无效。  
 
-```
+```java
 // 一、通过在声明交换器（ 调用channel.exchangeDeclare 方法）的时候添加alternate-exchange
 Map<String, Object> args = new HashMap<String, Object>();
 args.put("alternate-exchange", "myAe");
@@ -432,8 +432,8 @@ channel.queueBind("unroutedQueue", "myAe", "");
 如果此时发送一条消息到normalExchange 上，当路由键等于“normalKey”的时候，消息能正确路由到normalQueue 这个队列中。  、
 如果路由键设为其他值，比如“errorKey”，即消息不能被正确地路由到与normalExchange 绑定的任何队列上，此时就会发送给myAe，进而发送到unroutedQueue 这个队列。
 
-```
-// 二、采用策略（Policy）方式来设置备份交换器
+```bash
+# 二、采用策略（Policy）方式来设置备份交换器
 rabbitmqctl set_policy AE "^normalExchange$" ‘{"alternate-exchange": "myAE"}’
 ```
 
@@ -459,7 +459,7 @@ Time to Live 的简称，RabbitMQ 可以对消息和队列设置TTL。
 
 1. 通过队列属性设置消息TTL 的代码：
 
-```
+```java
 // 1.在channel.queueDeclare 方法中加入x-message-ttl 参数实现的，这个参数的单位是毫秒
 Map<String, Object> argss = new HashMap<String, Object>();
 argss.put("x-message-ttl",6000);
@@ -477,7 +477,7 @@ http://localhost:15672/api/queues/{vhost}/{queuename}
 
 2. 对消息本身进行单独设置TTL 的代码：
 
-```
+```java
 // 1.通过BasicProperties.Builder 设置
 AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
 builder.deliveryMode(2);//持久化消息
@@ -507,7 +507,7 @@ RabbitMQ 会确保在过期时间到达后将队列删除，但是不保障删�
 
 在RabbitMQ 重启后，持久化的队列的过期时间会被重新计算。
 
-```
+```java
 // 用于表示过期时间的x-expires 参数以毫秒为单位，并且服从和x-message-ttl 一样的约束条件，不过不能设置为0
 Map<String, Object> args = new HashMap<String, Object>();
 args.put("x-expires", 1800000);
@@ -525,7 +525,7 @@ DLX，全称为Dead-Letter-Exchange，可以称之为死信交换器。
 
 为某个队列设置DLX （实际上就是设置某个队列的属性），当这个队列中存在死信时，RabbitMQ 就会自动地将这个消息重新发布到设置的DLX 上去，进而被路由到DLX 的死信队列。
 
-```
+```java
 // 在channel.queueDeclare 方法中设置x-dead-letter-exchange 参数来为这个队列添加DLX
 channel.exchangeDeclare("dlx_exchange", "direct");//创建DLX: dlx_exchange
 Map<String, Object> args = new HashMap<String, Object>();
@@ -541,7 +541,7 @@ rabbitmqctl set_policy DLX ".*" '{"dead-letter-exchange":" dlx_exchange "}' --ap
 ```
 
 代码示例：
-```
+```java
 channel.exchangeDeclare("exchange.dlx", "direct", true);
 channel.exchangeDeclare("exchange.normal", "fanout", true);
 Map<String, Object> args = new HashMap<String, Object>();
@@ -576,7 +576,7 @@ channel.basicPublish("exchange.normal", "rk", MessageProperties.PERSISTENT_TEXT_
 ### 优先级队列
 具有高优先级的队列具有高的优先权，优先级高的消息具备优先被消费的特权。
 
-```
+```java
 // 1.配置一个队列的最大优先级可以通过设置队列的x-max-priority 参数来实现
 Map<String, Object> args = new HashMap<String, Object>();
 args.put("x-max-priority", 10);
@@ -613,7 +613,7 @@ Remote Procedure Call 的简称，即远程过程调用。
 对于回调队列而言，在其接收到一条回复的消息之后，它并不知道这条消息应该和哪一个请求匹配。这里就用到correlationId 这个属性了，我们应该为每一个请求设置一个唯一的correlationId。之后在回调队列接收到回复的消息时，可以根据这个属性匹配到相应的请求。如果回调队列接收到一条未知correlationId 的回复消息，可以简单地将其丢弃。
 
 RabbitMQ 官方用一个例子来做说明，RPC 客户端通过RPC 调用服务端的方法以便得到相应的斐波那契值：
-```
+```java
 // 服务端关键代码
 public class RPCServer {
     private static final String RPC_QUEUE_NAME = "rpc_queue";
@@ -747,7 +747,7 @@ publisher confirm 的优势在于并不一定需要同步确认。改进方式�
 异步confirm 在客户端Channel 接口中提供的addConfirmListener 方法可以添加ConfirmListener 这个回调接口， 这个ConfirmListener 接口包含两个方法：handleAck 和handleNack，分别用来处理RabbitMQ 回传的Basic.Ack 和Basic.Nack 。在这两个方法中都包含有一个参数deliveryTag（在publisher confirm 模式下用来标记消息的唯一有序序号）。我们需要为每一个信道维护一个“unconfirm”的消息序号集合，每发送一条消息，集合中的元素加1。每当调用ConfirmListener 中的handleAck 方法时，“unconfirm”集合中删掉相应的一条（multiple 设置为false）或者多条（multiple 设置为true）记录。这个“unconfirm”集合最好采用有序集合SortedSet 的存储结构。  
 <span style="color: red;">建议使用异步confirm 的方式</span>
 
-```
+```java
 // 异步confirm 的示例代码
 channel.confirmSelect();
 channel.addConfirmListener(new ConfirmListener() {
@@ -806,12 +806,12 @@ RabbitMQ 的持久化分为三个部分：
 RabbitMQ 不会为未确认的消息设置过期时间，它判断此消息是否需要重新投递给消费者的唯一依据是消费该消息的消费者连接是否已经断开，这么设计的原因是RabbitMQ 允许消费者消费一条消息的时间可以很久很久。
 
 RabbtiMQ 的Web 管理平台上可以看到当前队列中的“Ready”状态和“Unacknowledged”状态的消息数，也可以通过命令查看：
-```
+```bash
 [root@gackey-pc ~]# rabbitmqctl list_queues name messages_ready messages_unacknowledged
 ```
 
 消费者通过调用 channel.basicAck 方法，能够确认特定的消息
-```
+```java
 void basicAck(long deliveryTag, boolean multiple);
 ```
 > deliveryTag：这是消息的唯一标识符，每个从队列中投递给消费者的消息都有一个递增的delivery tag，用来追踪和确认每条消息。它是一个64 位的长整型值，最大值是9223372036854775807  
@@ -819,7 +819,7 @@ multiple（可选）：如果设置为 true，则表示确认deliveryTag 编号�
 
 ##### 拒绝消息
 
-```
+```java
 // 采用channel.basicReject 方法来拒绝这个消息，一次只能拒绝一条消息 
 void basicReject(long deliveryTag, boolean requeue) throws IOException;
 
@@ -834,7 +834,7 @@ multiple：如果设置为 true，则表示拒绝deliveryTag 编号以及之前�
 
 ##### 手动恢复消息
 通常用channel.basicRecover 在消费者崩溃后恢复未处理的消息
-```
+```java
 // 将所有未确认的消息重新加入到原始队列，再次投递给消费者
 channel.basicRecover();
 
@@ -848,7 +848,7 @@ channel.basicRecover(boolean requeue);
 **一.确保消息发送到 RabbitMQ 的交换器**
 - 启用消息确认机制  
 yml中的配置
-```
+```yml
 spring:
     rabbitmq:
         # 消息发送交换机，开启确认回调模式
@@ -857,7 +857,7 @@ spring:
         publisher-returns: true
 ```
 提供一个实现了 ConfirmCallback 接口的回调方法。当消息被成功发送到 RabbitMQ 时，这个方法会被调用。
-```
+```java
 rabbitTemplate.setConfirmCallback(new ConfirmCallback() {  
         @Override  
         public void confirm(CorrelationData correlationData, Exception exception) {  
@@ -875,7 +875,7 @@ rabbitTemplate.setConfirmCallback(new ConfirmCallback() {
 **二.确保消息路由到 RabbitMQ 的队列**
 1. 路由保证的失败通知（mandatory+ReturnListener）  
 生产者的 RabbitTemplate 里开启路由失败通知并添加失败通知的回调
-```
+```java
 //如果消息不能被路由到队列，那么不应该继续尝试发送消息。如果这个消息没有被路由，那么它会返回一个异常
 rabbitTemplate.setMandatory(true);
 //当消息不能被路由或消费者拒绝消息时，这个方法会被调用
@@ -891,16 +891,16 @@ rabbitTemplate.setReturnCallback(new ReturnCallback() {
 
 **三.确保消息在 RabbitMQ 正常存储**
 - 交换器持久化
-```  
+```java
 rabbitTemplate.setPersistent(true);
 ```
 - 队列持久化
-```
+```java
 // 使用RabbitTemplate的queue()方法创建持久化队列
 Queue queue = new Queue("my-queue", true);
 ```
 或者
-```
+```java
 Map<String, Object> args = new HashMap<String, Object>();
 // 设置durable属性为true以创建持久化队列
 args.put("durable", true);
@@ -908,7 +908,7 @@ args.put("durable", true);
 channel.queueDeclare("my-queue", false, false, false, args);
 ```
 - 消息持久化
-```
+```java
 rabbitTemplate.convertAndSend("exchange", "routing-key", message, new MessagePostProcessor() {  
     @Override  
     public Message postProcessMessage(Message message) throws AmqpException {  
@@ -922,7 +922,7 @@ rabbitTemplate.convertAndSend("exchange", "routing-key", message, new MessagePos
 - 手动确认  
 yml中配置
 
-```
+```yml
 spring:
     rabbitmq:
         host: 192.168.0.100
@@ -952,7 +952,7 @@ spring:
                 default-requeue-rejected: false
 ```
 Java代码处理
-```
+```java
 @Component
 @Slf4j
 public class AckCustomer {
@@ -1029,7 +1029,7 @@ RabbitMQ 会保存一个消费者的列表，每发送一条消息都会为对�
 
 channel.basicQos 有三种类型的重载方法：
 
-```
+```java
 void basicQos(int prefetchCount) throws IOException;
 void basicQos(int prefetchCount, boolean global) throws IOException;
 void basicQos(int prefetchSize, int prefetchCount, boolean global) throws IOException;
@@ -1044,7 +1044,7 @@ global参数 | AMQP 0-9-1 | RabbitMQ
 false | 信道上所有的消费者都需要遵从prefetchCount 的限定值 | 信道上新的消费者需要遵从prefetchCount 的限定值
 true | 当前通信链路（Connection）上所有的消费者都需要遵从prefetchCount 的限定值 | 信道上所有的消费者都需要遵从prefetchCount 的限定值
 
-```
+```java
 // 同一个信道上有多个消费者，如果设置了prefetchCount 的值，那么都会生效
 Channel channel = ...;
 Consumer consumer1 = ...;

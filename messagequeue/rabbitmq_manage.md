@@ -3,7 +3,7 @@
 ##### 安装Erlang
 1. 将erlang安装到/opt/erlang 目录下：
 
-```
+```bash
 [root@hidden ~]# tar zxvf otp_src_19.3.tar.gz
 [root@hidden ~]# cd otp_src_19.3
 [root@hidden otp_src_19.3]# ./configure --prefix=/opt/erlang
@@ -11,20 +11,20 @@
 
 2. 如果在安装的过程中出现类似“No ***** found”的提示，可根据提示信息安装相应的包，例如出现“No curses library functions found”报错：
 
-```
+```bash
 [root@hidden otp_src_19.3]# yum install ncurses-devel
 ```
 
 3. 安装Erlang：
 
-```
+```bash
 [root@hidden otp_src_19.3]# make
 [root@hidden otp_src_19.3]# make install
 ```
 
 4. 修改/etc/profile 配置文件，添加下面的环境变量：
 
-```
+```bash
 ERLANG_HOME=/opt/erlang
 export PATH=$PATH:$ERLANG_HOME/bin
 export ERLANG_HOME
@@ -32,13 +32,13 @@ export ERLANG_HOME
 
 最后执行如下命令让配置文件生效：
 
-```
+```bash
 [root@hidden otp_src_19.3]# source /etc/profile
 ```
 
 5. 输入erl 命令来验证Erlang 是否安装成功：
 
-```
+```bash
 [root@hidden ~]# erl
 Erlang/OTP 19 [erts-8.1] [source] [64-bit] [smp:4:4] [async-threads:10] [hipe] [kernel-poll:false]
 Eshell V8.1 (abort with ^G)
@@ -46,7 +46,7 @@ Eshell V8.1 (abort with ^G)
 
 ##### RabbitMQ 的安装与运行
 
-```
+```bash
 [root@hidden ~]# tar zvxf rabbitmq-server-generic-unix-3.6.10.tar.gz -C /opt
 [root@hidden ~]# cd /opt
 [root@hidden ~]# mv rabbitmq_server-3.6.10 rabbitmq
@@ -54,7 +54,7 @@ Eshell V8.1 (abort with ^G)
 
 修改/etc/profile 文件，添加下面的环境变量：
 
-```
+```bash
 export PATH=$PATH:/opt/rabbitmq/sbin
 export RABBITMQ_HOME=/opt/rabbitmq
 ```
@@ -63,7 +63,7 @@ export RABBITMQ_HOME=/opt/rabbitmq
 
 运行RabbitMQ，“-detached”参数是为了能够让RabbitMQ服务以守护进程的方式在后台运行：
 
-```
+```bash
 rabbitmq-server –detached
 ```
 
@@ -71,19 +71,19 @@ rabbitmq-server –detached
 
 添加新用户，用户名为“root”，密码为“root123”：
 
-```
+```bash
 [root@hidden ~]# rabbitmqctl add_user root root123
 ```
 
 为root 用户设置所有权限：
 
-```
+```bash
 [root@hidden ~]# rabbitmqctl set_permissions -p / root ".*" ".*" ".*"
 ```
 
 设置root 用户为管理员角色：
 
-```
+```bash
 [root@hidden ~]# rabbitmqctl set_user_tags root administrator
 ```
 
@@ -93,7 +93,7 @@ rabbitmq-server –detached
 **rabbitmqctl** 工具是用来管理RabbitMQ 中间件的命令行工具，它通过连接各个RabbitMQ 节点来执行所有操作。  
 rabbitmqctl 工具的标准语法如下（[]表示可选参数，{}表示必选参数）：
 
-```
+```bash
 rabbitmqctl [-n node] [-t timeout] [-q] {command} [command options...]
 ```
 
@@ -104,7 +104,7 @@ rabbitmqctl [-n node] [-t timeout] [-q] {command} [command options...]
 
 操作命令示例：
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_vhosts
 Listing vhosts
 /
@@ -123,7 +123,7 @@ vhost 是AMQP 概念的基础，客户端在连接的时候需要制定一个vho
 
 **创建一个新的vhost**，大括号里的参数表示vhost 的名称：  
 rabbitmqctl add_vhost {vhost}
-```
+```bash
 [root@node1 ~]# rabbitmqctl add_vhost vhost1
 Creating vhost "vhost1"
 ```
@@ -134,7 +134,7 @@ rabbitmqctl list_vhosts [vhostinfoitem...]
 > name：表示vhost 的名称。  
 tracing：表示是否使用了RabbitMQ 的trace 功能。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_vhosts name tracing
 Listing vhosts
 vhost1 false
@@ -150,7 +150,7 @@ vhost1 false
 **删除vhost** ，大括号里面的参数表示vhost 的名称。同时也会删除其下所有的队列、交换器、绑定关系、用户权限、参数和策略等信息：  
 rabbitmqctl delete_vhost {vhost}
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl delete_vhost vhost1
 Deleting vhost "vhost1"
 ```
@@ -184,11 +184,11 @@ Basic.Get | | | queue
 Basic.Consume | | | queue
 Queue.Purge | | | queue
 
-```
-// 授予root 用户可访问虚拟主机vhost1，并在所有资源上都具备可配置、可写及可读的权限
+```bash
+# 授予root 用户可访问虚拟主机vhost1，并在所有资源上都具备可配置、可写及可读的权限
 [root@node1 ~]# rabbitmqctl set_permissions -p vhost1 root ".*" ".*" ".*"
 Setting permissions for user "root" in vhost "vhost1"
-// 授予root 用户可访问虚拟主机vhost2，在以“queue”开头的资源上具备可配置权限，并在所有资源上拥有可写、可读的权限
+# 授予root 用户可访问虚拟主机vhost2，在以“queue”开头的资源上具备可配置权限，并在所有资源上拥有可写、可读的权限
 [root@node1 ~]# rabbitmqctl set_permissions -p vhost2 root "^queue.*" ".*" ".*"
 Setting permissions for user "root" in vhost "vhost2"
 ```
@@ -198,7 +198,7 @@ rabbitmqctl clear_permissions [-p vhost] {username}
 > vhost ：设置禁止用户访问的虚拟主机的名称，默认为“/”。  
 username ：表示禁止访问特定虚拟主机的用户名称。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl clear_permissions -p vhost1 root
 Clearing permissions for user "root" in vhost "vhost1"
 ```
@@ -209,7 +209,7 @@ rabbitmqctl list_permissions [-p vhost]
 **显示用户的权限**：  
 rabbitmqctl list_user_permissions {username}
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_permissions -p vhost1
 Listing permissions in vhost "vhost1"
 root .* .* .*
@@ -227,8 +227,8 @@ rabbitmqctl add_user {username} {password}
 > username ：表示要创建的用户名称  
 password ：表示创建用户登录的密码  
 
-```
-// 创建一个用户名为root、密码为root123 的用户
+```bash
+# 创建一个用户名为root、密码为root123 的用户
 [root@node1 ~]# rabbitmqctl add_user root root123
 Creating user "root"
 ```
@@ -238,8 +238,8 @@ rabbitmqctl change_password {username} {newpassword}
 > username ：表示要变更密码的用户名称  
 newpassword ：表示要变更的新的密码
 
-```
-// 将root 用户的密码变更为root321
+```bash
+# 将root 用户的密码变更为root321
 [root@node1 ~]# rabbitmqctl change_password root root321
 Changing password for user "root"
 ```
@@ -253,12 +253,12 @@ rabbitmqctl authenticate_user {username} {password}
 > username ：表示需要被验证的用户名称  
 password ：表示密码
 
-```
-// 采用密码root321 来验证root 用户
+```bash
+# 采用密码root321 来验证root 用户
 [root@node1 ~]# rabbitmqctl authenticate_user root root321
 Authenticating user "root"
 Success
-// 采用密码root322 来验证root 用户
+# 采用密码root322 来验证root 用户
 [root@node1 ~]# rabbitmqctl authenticate_user root root322
 Authenticating user "root"
 Error: failed to authenticate user "root"
@@ -268,7 +268,7 @@ Error: failed to authenticate user "root"
 rabbitmqctl delete_user {username}
 > username ：表示要删除的用户名称
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl delete_user root
 Deleting user "root"
 ```
@@ -276,7 +276,7 @@ Deleting user "root"
 **罗列当前的所有用户**：  
 rabbitmqctl list_users
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_users
 Listing users
 guest [administrator]
@@ -295,7 +295,7 @@ rabbitmqctl set_user_tags {username} {tag ...}
 > username ：参数表示需要设置角色的用户名称  
 tag ：参数用于设置0 个、1 个或者多个的角色，设置之后任何之前现有的身份都会被删除
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl set_user_tags root
 Setting tags for user "root" to []
 [root@node1 ~]# rabbitmqctl list_users -q
@@ -314,7 +314,7 @@ RabbitMQ management 插件可以提供Web 管理界面用来管理如前面所�
 
 先启用RabbitMQ management 插件。RabbitMQ 提供了很多的插件，默认存放在$RABBITMQ_HOME/plugins 目录下：
 
-```
+```bash
 [root@node1 plugins]# ls -al
 -rw-r--r-- 1 root root 270985 Oct 25 19:45 amqp_client-3.6.10.ez
 -rw-r--r-- 1 root root 225671 Oct 25 19:45 cowboy-1.0.4.ez
@@ -335,7 +335,7 @@ rabbitmq-plugins list
 
 > 标记为[E*]的为显式启动，而[e*]为隐式启动，如显式启动rabbitmq_management 插件会同时隐式启动amqp_client、cowboy、cowlib 等另外5 个插件。
 
-```
+```bash
 [root@node1 ~]# rabbitmq-plugins list
 Configured: E = explicitly enabled; e = implicitly enabled
 | Status: * = running on rabbit@node1
@@ -360,7 +360,7 @@ Configured: E = explicitly enabled; e = implicitly enabled
 用于停止运行RabbitMQ 的Erlang 虚拟机和RabbitMQ 服务应用。  
 如果指定了pid_file，还需要等待指定进程的结束。其中pid_file 是通过调用rabbitmq-server 命令启动RabbitMQ 服务时创建的，默认情况下存放于Mnesia 目录中，可以通过RABBITMQ_PID_FILE 这个环境变量来改变存放路径。注意，如果使用rabbitmq-server –detach 这个带有-detach 后缀的命令来启动RabbitMQ 服务则不会生成pid_file 文件。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl stop /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit\@node1.pid
 Stopping and halting node rabbit@node1
 [root@node1 ~]# rabbitmqctl stop
@@ -372,7 +372,7 @@ Stopping and halting node rabbit@node1
 执行这个命令会阻塞直到Erlang 虚拟机进程退出。如果RabbitMQ 没有成功关闭，则会返回一个非零值。  
 这个命令和rabbitmqctl stop 不同的是，它不需要指定pid_file 而可以阻塞等待指定进程的关闭。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl shutdown
 Shutting down RabbitMQ node rabbit@node1 running at PID 1706
 Waiting for PID 1706 to terminate
@@ -383,7 +383,7 @@ RabbitMQ node rabbit@node1 running at PID 1706 successfully shut down
 停止RabbitMQ 服务应用，但是Erlang 虚拟机还是处于运行状态。  
 此命令的执行优先于其他管理操作（这些管理操作需要先停止RabbitMQ 应用），比如rabbitmqctl reset。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl stop_app
 Stopping rabbit application on node rabbit@node1
 ```
@@ -392,7 +392,7 @@ Stopping rabbit application on node rabbit@node1
 启动RabbitMQ 应用。  
 此命令典型的用途是在执行了其他管理操作之后，重新启动之前停止的RabbitMQ 应用，比如rabbitmqctl reset。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl start_app
 Starting node rabbit@node1
 ```
@@ -401,7 +401,7 @@ Starting node rabbit@node1
 等待RabbitMQ 应用的启动。  
 它会等到pid_file 的创建，然后等待pid_file 中所代表的进程启动。当指定的进程没有启动RabbitMQ 应用而关闭时将会返回失败。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl wait /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit\@node1.pid
 Waiting for rabbit@node1
 pid is 3468
@@ -411,7 +411,7 @@ pid is 3468
 将RabbitMQ 节点重置还原到最初状态。包括从原来所在的集群中删除此节点，从管理数据库中删除所有的配置数据，如已配置的用户、vhost 等，以及删除所有的持久化消息。  
 执行rabbitmqctl reset 命令前必须停止RabbitMQ 应用（比如先执行rabbitmqctl stop_app）。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl stop_app
 Stopping rabbit application on node rabbit@node1
 [root@node1 ~]# rabbitmqctl reset
@@ -423,7 +423,7 @@ Resetting node rabbit@node
 rabbitmqctl force_reset 命令不论当前管理数据库的状态和集群配置是什么，都会无条件地重置节点。它只能在数据库或集群配置已损坏的情况下使用。  
 执行rabbitmqctl force_reset 命令前必须先停止RabbitMQ 应用。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl stop_app
 Stopping rabbit application on node rabbit@node1
 [root@node1 ~]# rabbitmqctl force_reset
@@ -434,10 +434,10 @@ Forcefully resetting node rabbit@node1
 指示RabbitMQ 节点轮换日志文件。RabbitMQ节点会将原来的日志文件中的内容追加到“原始名称+后缀”的日志文件中，然后再将新的日志内容记录到新创建的日志中（与原日志文件同名）。  
 当目标文件不存在时，会重新创建。如果不指定后缀suffix，则日志文件只是重新打开而不会进行轮换。
 
-```
-// 原日志文件为rabbit@node1.log 和rabbit@node1-sasl.log
-// 轮换日志之后，原日志文件中的内容就被追加到rabbit@node1.log.bak 和 rabbit@node1-sasl.log.bak 日志中
-// 之后重新建立rabbit@node1.log 和rabbit@node1-sasl.log 文件用来接收新的日志
+```bash
+# 原日志文件为rabbit@node1.log 和rabbit@node1-sasl.log
+# 轮换日志之后，原日志文件中的内容就被追加到rabbit@node1.log.bak 和 rabbit@node1-sasl.log.bak 日志中
+# 之后重新建立rabbit@node1.log 和rabbit@node1-sasl.log 文件用来接收新的日志
 [root@node1 rabbitmq]# ll
 -rw-r--r-- 1 root root 1024127 Oct 18 11:56 rabbit@node1.log
 -rw-r--r-- 1 root root 720553 Oct 17 19:16 rabbit@node1-sasl.log
@@ -454,7 +454,7 @@ Rotating logs to files with suffix ".bak"
 将部分RabbitMQ 代码用HiPE（HiPE 是指High Performance Erlang，是Erlang 版的JIT）编译，并且将编译后的.beam 文件（beam 文件是Erlang 编译器生成的文件格式，可以直接加载到Erlang 虚拟机中运行的文件格式）保存到指定的文件目录中。如果这个目录不存在则会自行创建。如果这个目录中原本有任何.beam 文件，则会在执行编译前被删除。  
 如果要使用预编译的这些文件，则需要设置RABBITMQ_SERVER_CODE_PATH 这个环境变量来指定hipe_compile 调用的路径。
 
-```
+```bash
 [root@node1 rabbitmq]# rabbitmqctl hipe_compile
 /opt/rabbitmq/tmp/rabbit-hipe/ebin
 HiPE compiling: |-----------------------------------------------|
@@ -478,7 +478,7 @@ Compiled 57 modules in 55s
 在集群中的节点应用启动前咨询clusternode 节点的最新信息，并更新相应的集群信息。  
 这个和join_cluster 不同，它不加入集群。考虑这样一种情况，节点A 和节点B 都在集群中，当节点A 离线了，节点C 又和节点B 组成了一个集群，然后节点B 又离开了集群，当A 醒来的时候，它会尝试联系节点B，但是这样会失败，因为节点B 已经不在集群中了。
 
-```
+```bash
 ##假设已有node1 和node 组成的集群
 ##1.初始状态
 [root@node1 ~]# rabbitmqctl cluster_status
@@ -514,7 +514,7 @@ Cluster status of node rabbit@node1
 通常情况下，当关闭整个RabbitMQ 集群时，重启的第一个节点应该是最后关闭的节点，因为它可以看到其他节点所看不到的事情。但是有时会有一些异常情况出现，比如整个集群都掉电而所有节点都认为它不是最后一个关闭的。在这种情况下，可以调用rabbitmqctl force_boot 命令，这就告诉节点可以无条件地启动节点。  
 在此节点关闭后，集群的任何变化，它都会丢失。如果最后一个关闭的节点永久丢失了，那么需要优先使用rabbitmqctl forget_cluster_node --offline 命令，因为它可以确保镜像队列的正常运转。
 
-```
+```bash
 [root@node2 ~]# rabbitmqctl force_boot
 Forcing boot for Mnesia dir /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit@node2
 [root@node2 ~]# rabbitmq-server –detached
@@ -525,7 +525,7 @@ Forcing boot for Mnesia dir /opt/rabbitmq/var/lib/rabbitmq/mnesia/rabbit@node2
 同步期间此队列会被阻塞（所有此队列的生产消费者都会被阻塞），直到同步完成。此条命令执行成功的前提是队列queue 配置了镜像。  
 注意，未同步队列中的消息被耗尽后，最终也会变成同步，此命令主要用于未耗尽的队列。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl sync_queue queue
 Synchronising queue 'queue' in vhost '/'
 ```
@@ -533,7 +533,7 @@ Synchronising queue 'queue' in vhost '/'
 - rabbitmqctl cancel_sync_queue [-p vhost] {queue}  
 取消队列queue 同步镜像的操作
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl cancel_sync_queue queue
 Stopping synchronising queue 'queue' in vhost '/'
 ```
@@ -543,7 +543,7 @@ Stopping synchronising queue 'queue' in vhost '/'
 Federation 和Shovel 插件也会有用到集群名称的地方。集群名称默认是集群中第一个节点的名称。  
 在Web 管理界面的右上角有个“（change）”的地方，点击也可以修改集群名称。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl set_cluster_name cluster_hidden
 Setting cluster name to cluster_hidden
 [root@node1 ~]# rabbitmqctl cluster_status
@@ -594,7 +594,7 @@ state：队列状态。正常情况下是running；如果队列正常同步数�
 
 如果没有指定queueinfoitems，那么此命令将显示队列的名称和消息的个数。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_queues -p vhost1 name disk_writes disk_reads -q
 queue4 3390 0
 queue5 0 0
@@ -615,7 +615,7 @@ policy：应用到交换器上的策略名称。
 
 如果没有指定exchangeinfoitem，那么此命令将显示交换器的名称和类型。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_exchanges name type durable auto_delete internal arguments policy -q
 amq.rabbitmq.trace  topic   true false true  []
 amq.headers         headers true false false []
@@ -641,8 +641,8 @@ arguments：绑定的参数。
 
 如果没有指定bindinginfoitem，那么将显示所有的条目。
 
-```
-// 交换器exchange1 和队列queue1 通过rk1 进行绑定，还有一个独立的队列queue2。显示的第一行是默认的交换器与queue1 进行绑定，这个是RabbitMQ 内置的功能。
+```bash
+# 交换器exchange1 和队列queue1 通过rk1 进行绑定，还有一个独立的队列queue2。显示的第一行是默认的交换器与queue1 进行绑定，这个是RabbitMQ 内置的功能。
 [root@node1 ~]# rabbitmqctl list_bindings -q
           exchange queue1 queue queue1 []
           exchange queue2 queue queue2 []
@@ -687,7 +687,7 @@ connected_at：连接建立的时间戳。
 
 如果没有指定connectioninfoitem，那么会显示user、peer_host、peer_port 和state 这几项信息。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_connections -q
 root 192.168.0.22 57304 running
 root 192.168.0.22 57316 running
@@ -716,7 +716,7 @@ global_prefetch_count：整个信道的Qos 个数限制。0 表示无上限。
 
 如果没有指定channelinfoitem，那么会显示pid、user、consumer_count 和messages_unacknowledged 这几项信息。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_channels -q
 <rabbit@node1.1.631.0> root 0 0
 <rabbit@node1.1.643.0> root 1 0
@@ -726,7 +726,7 @@ global_prefetch_count：整个信道的Qos 个数限制。0 表示无上限。
 列举消费者信息。  
 每行将显示由制表符分隔的已订阅队列的名称、相关信道的进程标识、consumerTag、是否需要消费端确认、prefetch_count 及参数列表这些信息。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_consumers -p default -q
 queue4 <rabbit@node1.1.1628.11> consumer_zzh true 0 []
 ```
@@ -737,7 +737,7 @@ queue4 <rabbit@node1.1.1628.11> consumer_zzh true 0 []
 - rabbitmqctl node_health_check  
 对RabbitMQ 节点进行健康检查，确认应用是否正常运行、list_queues 和list_channels是否能够正常返回等。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl node_health_check
 Timeout: 70.0 seconds
 Checking health of node rabbit@node1
@@ -750,7 +750,7 @@ Health check passed
 - rabbitmqctl report  
 为所有服务器状态生成一个服务器状态报告，并将输出重定向到一个文件。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl report > report.txt
 ```
 
@@ -758,8 +758,8 @@ Health check passed
 执行任意Erlang 表达式。  
 用户、Parameter、vhost、权限等都可以通过rabbitmqctl 工具来完成创建（或删除）的操作，而交换器、队列及绑定关系的创建（或删除）操作可以通过rabbitmqctl eval {expr} 实现。
 
-```
-// 返回rabbitmqctl连接的节点名称
+```bash
+# 返回rabbitmqctl连接的节点名称
 [root@node1 ~]# rabbitmqctl eval 'node().'
 rabbit@node1
 ```
@@ -777,8 +777,8 @@ HTTP API 是完全基于RESTful 风格的，不同的HTTP API 接口所对应的
 
 所有的HTTP API 接口都需要HTTP 基础认证（使用标准的RabbitMQ 用户数据库），默认的是guest/guest（非localhost 的不能使用这组认证，除非特殊设置）
 
-```
-// 通过curl 命令创建队列queue ，“%2F”是指默认的vhost，即“/”，这类特殊字符在HTTP URL 中是需要转义的
+```bash
+# 通过curl 命令创建队列queue ，“%2F”是指默认的vhost，即“/”，这类特殊字符在HTTP URL 中是需要转义的
 [root@node1 ~]# curl -i -u root:root123 -H "content-type:application/json"
 -XPUT -d '{"auto_delete":false,"durable":true,"node":"rabbit@node2"}'
 http://192.168.0.2:15672/api/queues/%2F/queue
@@ -789,10 +789,10 @@ content-length: 0
 content-type: application/json
 vary: accept, accept-encoding, origin
 
-// 通过GET 方法来获取队列queue 的信息
+# 通过GET 方法来获取队列queue 的信息
 [root@node1 ~]# curl -i -u root:root123 –XGET http://192.168.0.2:15672/api/queues/%2F/queue
 
-// 通过DELETE 方法来删除队列queue
+# 通过DELETE 方法来删除队列queue
 [root@node1 ~]# curl -i -u root:root123 -XDELETE http://192.168.0.2:15672/api/queues/%2F/queue
 ```
 
@@ -803,25 +803,25 @@ rabbitmqadmin是RabbitMQ Management 插件提供的功能，它会包装HTTP API
 
 rabbitmqadmin 是需要安装的，可以点击Web 管理页面左下角的“Command Line”跳转到“rabbitmqadmin”页面进行下载，或者通过下面的示例进行下载并添加可执行权限。在使用rabbitmqadmin前还要确保已经成功安装Python。
 
-```
+```bash
 [root@node1 ~]# wget http://192.168.0.2:15672/cli/rabbitmqadmin
 [root@node1 ~]# chmod +x rabbitmqadmin
 ```
 
 <span style="color: red;font-weight: bold;">Tips</span>：通过rabbitmqadmin --help 命令可以获得相应的使用方式。
 
-```
-// 创建队列
+```bash
+# 创建队列
 [root@node1 ~]# ./rabbitmqadmin -u root -p root123 declare queue name=queue1
 queue declared
-// 显示队列
+# 显示队列
 [root@node1 ~]# ./rabbitmqadmin list queues
 +--------+----------+
 | name   | messages |
 +--------+----------+
 | queue1 | 0        |
 +--------+----------+
-// 删除队列
+# 删除队列
 [root@node1 ~]# ./rabbitmqadmin -u root -p root123 delete queue name=queue1
 queue deleted
 ```
@@ -842,7 +842,7 @@ RabbitMQ 的环境变量都是以“RABBITMQ_”开头的，可以在Shell 环�
 如果需要制定节点的名称，可以在rabbitmq-server 命令前添加RABBITMQ_NODENAME 变量来设定指定的名称。  
 如下所示，此时创建的节点名称为“rabbit@node2”而非“rabbit@node1”。
 
-```
+```bash
 [root@node1 ~]# RABBITMQ_NODENAME=rabbit@node2 rabbitmq-server -detached
 Warning: PID file not written; -detached was passed.
 ```
@@ -873,7 +873,7 @@ RABBITMQ_PLUGINS_DIR | 插件所在路径。默认值为$RABBITMQ_HOME/plugins
 
 注意，如果没有特殊的需求，不建议更改RabbitMQ 的环境变量。如果在实际生产环境中，对于配置和日志的目录有着特殊的管理目录，那么可以参考以下相应的配置：
 
-```
+```bash
 #配置文件的地址，对于rabbitmq.config 文件来说这里不用添加“.config 后缀”
 CONFIG_FILE=/apps/conf/rabbitmq/rabbitmq
 #环境变量的配置文件的地址
@@ -899,7 +899,7 @@ MNESIA_BASE=/apps/dbdat/rabbitmq/mnesia
 
 #### 配置项
 一个极简的rabbitmq.config 文件配置如以下代码所示（注意包含尾部的点号），该配置将RabbitMQ 监听AMQP 0-9-1 客户端连接的默认端口号从5672 修改为5673：
-```
+```bash
 [
     {
         rabbit, [
@@ -961,7 +961,7 @@ queue_explicit_gc_run_operation_threshold | 在使用正常队列时进行内存
 加密并不是意味着系统的安全性增强了，而是遵从一些必要的规范，让一些敏感的数据不会出现在文本形式的配置文件中。
 在配置文件中将加密之后的值以“{encrypted,加密的值}”形式包裹，比如下面的示例中使用口令“zzhpassphrase”将密码“guest”加密。
 
-```
+```bash
 [{
     rabbit,[
         {default_user,<<"guest">>},
@@ -983,7 +983,7 @@ config_entry_decoder 项中的passphrase 配置的就是口令。
 
 passphrase 项中的内容不一定要以硬编码的形式呈现，还可以使用单独文件来赋值：
 
-```
+```bash
 [
     {rabbit, [
         ...
@@ -996,18 +996,18 @@ passphrase 项中的内容不一定要以硬编码的形式呈现，还可以使
 
 encrypted 项中加密后的值由rabbitmqctl encode 命令的来，如下所示：
 
-```
-// 加密过程
+```bash
+# 加密过程
 [root@node1 ~]# rabbitmqctl encode '<<"guest">>' zzhpassphrase
 {encrypted,<<"HuVPYgSUdbogWL+2jGsgDMGZpDfiz+HurDuedpG8dQX/U+DMHcBluAl5a5jRnAbs+OviX5EmsJJ+c0XgRRcADA==">>}
-// 解密过程
+# 解密过程
 [root@node1 ~]# rabbitmqctl encode --decode '{encrypted,<<"HuVPYgSUdbogWL+2jGsgDMGZpDfiz+HurDuedpG8dQX/U+DMHcBluAl5a5jRnAbs+OviX5EmsJJ+c0XgRRcADA==">>}' zzhpassphrase
 <<"guest">>
 ```
 
 默认情况下，加密机制PBKDF2 用来从口令中派生出密钥。默认的Hash 算法是SHA512，默认的迭代次数是1000，以及默认的加密算法为AES_256_CBC。可以在配置文件中进行修改，示例如下：
 
-```
+```bash
 [
     {rabbit, [
         ...
@@ -1023,7 +1023,7 @@ encrypted 项中加密后的值由rabbitmqctl encode 命令的来，如下所示
 
 也可以通过rabbitmqctl encode 命令设置时指定：
 
-```
+```bash
 rabbitmqctl encode --cipher blowfish_cfb64 --hash sha256 --iterations 10000 '<<"guest">>' zzhpassphrase
 ```
 
@@ -1032,7 +1032,7 @@ rabbitmqctl encode 的完整命令为：
 
 [--list-ciphers] 、[--list-hashes]两个参数分别用来罗列当前RabbitMQ 所支持的加密算法和Hash 算法。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl encode --list-ciphers
 [des3_cbc,des_ede3,des3_cbf,des3_cfb,aes_cbc,aes_cbc128,aes_cfb8,aes_cfb128,aes_cbc256,aes_ige256,des_cbc,des_cfb,blowfish_cbc,blowfish_cfb64,blowfish_ofb64,rc2_cbc]
 
@@ -1047,7 +1047,7 @@ rabbitmqctl encode 的完整命令为：
 RabbitMQ 在等待接收客户端连接时需要绑定一个或者多个网络接口（可以理解成IP 地址），并监听特定的端口。网络接口使用rabbit.tcp_listeners 选项来配置。  
 同时监听IPv4 和IPv6 上监听，示例如下：
 
-```
+```bash
 [
     {rabbit, [
         {tcp_listeners, [
@@ -1062,7 +1062,7 @@ RabbitMQ 在等待接收客户端连接时需要绑定一个或者多个网络�
 当连接数量到达数万或者更多时，重要的是确保服务器能够接受入站连接。未接受的TCP 连接将会放在有长度限制的队列中。这个通过rabbit.tcp_listen_options.backlog 参数来设置，默认值为128，当挂起的连接队列的长度超过此值时，连接将被操作系统拒绝。  
 下面的示例中将TCP 缓冲区大小设置为192KB：
 
-```
+```bash
 [
     {rabbit, [
         {tcp_listen_options, [
@@ -1079,7 +1079,7 @@ RabbitMQ 在等待接收客户端连接时需要绑定一个或者多个网络�
 
 Erlang 在运行时使用线程池来异步执行I/O 操作。线程池的大小可以通过RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS 这个环境变量来调节。RabbitMQ 3.6.x 版本的默认值为128。当机器的内核个数大于等于8 时，建议将此值设置为大于等于96，这样可以确保每个内核上可以运行大于等于12 个I/O 线程。注意这个值并不是越高越能提高吞吐量。示例如下：
 
-```
+```bash
 RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS="+A 128"
 ```
 
@@ -1089,7 +1089,7 @@ RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS="+A 128"
 
 禁用Nagle 算法可以提高吞吐量，并减少延迟。RabbitMQ 内部节点交互时可以在kernel.inet_default_connect_options 、kernel.inet_default_listen_options 和rabbit.tcp_listen_options 配置项中配置{nodelay, true} 来禁用Nagle 算法。
 
-```
+```bash
 [
     {kernel, [
         {inet_default_connect_options, [{nodelay, true}]},
@@ -1148,7 +1148,7 @@ clear_parameter
 - rabbitmqctl set_parameter [-p vhost] {component_name} {name} {value}  
 用来设置一个参数。
 
-```
+```bash
 [root@node1 ~]# rabbitmq-plugins enable rabbitmq_federation
 [root@node1 ~]# rabbitmqctl set_parameter federation-upstream f1 '{"uri":"amqp://root:root123@192.168.0.2:5672","ack-mode":"on-confirm"}'
 Setting runtime parameter "f1" for component "federation-upstream" to "{\"uri\":\"amqp://root:root123@192.168.0.2:5672\",\"ack-mode\":\"on-confirm\"}"
@@ -1157,7 +1157,7 @@ Setting runtime parameter "f1" for component "federation-upstream" to "{\"uri\":
 - rabbitmqctl list_parameters [-p vhost]  
 用来列出指定虚拟主机上所有的Parameter。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_parameters -p /
 Listing runtime parameters
 federation-upstream f1 {"uri":"amqp://root:root123@192.168.0.2:5672","ackmode":"on-confirm"}
@@ -1166,7 +1166,7 @@ federation-upstream f1 {"uri":"amqp://root:root123@192.168.0.2:5672","ackmode":"
 - rabbitmqctl clear_parameter [-p vhost] {componenet_name} {key}  
 用来清除指定的参数。  
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl clear_parameter -p / federation-upstream f1
 Clearing runtime parameter "f1" for component "federation-upstream"
 ```
@@ -1184,7 +1184,7 @@ global 级别的Parameter 的操作如下：
 罗列参数 | rabbitmqctl list_global_parameters | GET /api/global-parameters/
 清除参数 | rabbitmqctl clear_global_parameter name | DELETE /api/global-parameters/name
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl set_global_parameter name1 '{}'
 Setting global runtime parameter "name1" to "{}"
 [root@node1 ~]# rabbitmqctl list_global_parameters
@@ -1222,10 +1222,10 @@ Policy 也可以通过rabbitmqctl 工具或者HTTP API 接口来操作。
 
 设置默认的vhost 中所有以“^amq.”开头的交换器为联邦交换器：
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl set_policy --apply-to exchanges --priority 1 p1 "^amq." '{"federation-upstream":"f1"}'
 
-// 对应的HTTP API 接口调用
+# 对应的HTTP API 接口调用
 [root@node1 ~]# curl -i -u root:root123 -XPUT -d '{"pattern": "^amq\.","definition":{"federation-upstream":"f1"}, "priority": 1, "apply-to": "exchanges"}' 
 http://192.168.0.2:15672/api/policies/%2F/p1
 ```
@@ -1233,12 +1233,12 @@ http://192.168.0.2:15672/api/policies/%2F/p1
 - rabbitmqctl list_policies [-p vhost]  
 列出默认vhost 中所有的Policy。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl list_policies
 Listing policies
 / p1 exchanges ^amq. {"federation-upstream":"f1"} 1
 
-// 对应的HTTP API 接口调用
+# 对应的HTTP API 接口调用
 [root@node1 ~]# curl -i -u root:root123 -XGET http://192.168.0.2:15672/api/policies/%2F
 HTTP/1.1 200 OK
 server: Cowboy
@@ -1253,10 +1253,10 @@ Cache-Control: no-cache
 - rabbitmqctl clear_policy [-p vhost] {name}  
 清除指定的Policy。
 
-```
+```bash
 [root@node1 ~]# rabbitmqctl clear_policy p1
 
-// 对应的HTTP API 接口调用
+# 对应的HTTP API 接口调用
 [root@node1 ~]# curl -i -u root:root123 -XDELETE http://192.168.0.2:15672/api/policies/%2F/p1
 ```
 

@@ -1,5 +1,4 @@
-* [Spring Cloud Alibaba](springcloudalibaba/initializr.md)
-* [Spring Cloud](springcloud/springAnalysis.md)
+* [Spring Cloud](springcloud/alibaba.md)
 * [Java](java/JVM.md)
 * [算法](algorithm/dataStructure.md)
 * [Redis](redis/redis_command.md)

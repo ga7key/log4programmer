@@ -1,6 +1,7 @@
 * [Spring Cloud](springcloud/alibaba.md)
 * [Java](java/JVM.md)
 * [算法](algorithm/dataStructure.md)
+* [设计模式](designPattern/design_pattern.md)
 * [Redis](redis/redis_command.md)
 * [消息队列](messagequeue/messagequeue.md)
 * [Linux运维](linuxOps/concurrency.md)

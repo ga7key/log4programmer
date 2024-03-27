@@ -1,4 +1,6 @@
-### RabbitMQ 安装
+> RabbitMQ 版本为3.6.10
+
+## RabbitMQ 安装
 
 ##### 安装Erlang
 1. 将erlang安装到/opt/erlang 目录下：

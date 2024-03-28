@@ -11,7 +11,7 @@
 - **插件机制**：RabbitMQ 提供了许多插件，以实现从多方面进行扩展，当然也可以编写自己的插件。
 
 ### RabbitMQ的模型架构
-![rabbitmq_model_architecture](../images/mq/2024-1-25_RabbitMQ模型架构.png)
+![rabbitmq_model_architecture](../images/rabbitmq/2024-1-25_RabbitMQ模型架构.png)
 
 ### RabbitMQ基本概念
 #### Producer：生产者
@@ -69,7 +69,7 @@ RabbitMQ 中通过绑定将交换器与队列关联起来，在绑定的时候�
 BindingKey 并不是在所有的情况下都生效，它依赖于交换器类型，比如fanout 类型的交换器就会无视BindingKey，而是将消息路由到所有绑定到该交换器的队列中。
 
 ### RabbitMQ的运转过程
-![rabbitmq_running_process](../images/mq/2024-1-26_RabbitMQ运转过程.png)
+![rabbitmq_running_process](../images/rabbitmq/2024-1-26_RabbitMQ运转过程.png)
 - **生产者发送消息的过程**  
 （1）生产者连接到RabbitMQ Broker，建立一个连接（Connection），开启一个信道（Channel）  
 （2）生产者声明一个交换器，并设置相关属性，比如交换机类型、是否持久化等  
@@ -569,7 +569,7 @@ channel.basicPublish("exchange.normal", "rk", MessageProperties.PERSISTENT_TEXT_
 
 死信队列可以被视为延迟队列，假设一个应用中将每条消息都设置为10 秒的延迟，生产者通过交换器将发送的消息存储到队列中。消费者订阅的并非是这个队列，而是给这个队列配置的死信队列。当消息这个队列中过期之后被存入死信队列中，消费者就恰巧消费到了延迟10 秒的这条消息。
 
-![延迟队列](../images/mq/2024-1-29_RabbitMQ延迟队列.png ':size=50%')  
+![延迟队列](../images/rabbitmq/2024-1-29_RabbitMQ延迟队列.png ':size=50%')  
 > 根据应用需求的不同，生产者在发送消息的时候通过设置不同的路由键，以此将消息发送到与交换器绑定的不同的队列中。这里队列分别设置了过期时间为5 秒、10 秒、30 秒、1 分钟，同时也分别配置了DLX 和相应的死信队列。当相应的消息过期时，就会转存到相应的死信队列（即延迟队列）中，这样消费者根据业务自身的情况，分别选择不同延迟等级的延迟队列进行消费。
 
 
@@ -596,7 +596,7 @@ channel.basicPublish("exchange_priority","rk_priority",properties,("messages").g
 Remote Procedure Call 的简称，即远程过程调用。  
 客户端发送请求消息，服务端回复响应的消息。为了接收响应的消息，我们需要在请求消息中发送一个回调队列（可以使用默认的队列）。
 
-![rpc_process](../images/mq/2024-1-29_RPC流程.png)
+![rpc_process](../images/rabbitmq/2024-1-29_RPC流程.png)
 
 上图的处理流程：
 > 1. 当客户端启动时，创建一个匿名的回调队列（名称由RabbitMQ 自动创建，图中的回调队列为amq.gen-LhQz1gv3GhDOv8PIDabOXA）
@@ -778,7 +778,7 @@ while (true) {
 }
 ```
 生产者确认的4种方式QPS对比（横坐标表示测试的次数，纵坐标表示QPS）：  
-![publish_confirm_qps](../images/mq/2024-1-30_生产者确认的4种方式QPS对比.jpg)
+![publish_confirm_qps](../images/rabbitmq/2024-1-30_生产者确认的4种方式QPS对比.jpg)
 
 <span style="color: red;font-weight: bold;">Tips</span>：事务机制和publisher confirm 机制两者是互斥的，不能共存。  
 &emsp;&emsp;生产者确认确保的是消息能够正确地发送至RabbitMQ，如果此交换器没有匹配的队列，那么消息也会丢失。所以需要配合使用mandatory 参数或者备份交换器来确保消息能够从交换器路由到队列。

@@ -52,7 +52,7 @@ runbroker.sh脚本中就是为启动Broker设置对应的JVM参数和其他一�
 >- sendMessageThreadPoolNums=16 ：这个参数的意思就是RocketMQ内部用来发送消息的线程池的线程数量，默认是16，可以根据机器的CPU数量修改
 
 ### RocketMQ集群部署
-![rocketmq_deploy_mindmap](../images/mq/2023-12-20_rocketmq部署.png)
+![rocketmq_deploy_mindmap](../images/rocketmq/2023-12-20_rocketmq部署.png)
 
 ### 订单系统架构
-![order_architecture](../images/mq/2023-12-20_order_architecture.png)
+![order_architecture](../images/rocketmq/2023-12-20_order_architecture.png)

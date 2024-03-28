@@ -889,7 +889,7 @@ MNESIA_BASE=/apps/dbdat/rabbitmq/mnesia
 ### 配置文件
 默认的配置文件的位置取决于不同的操作系统和安装包。  
 1. 最有效的方法就是检查RabbitMQ 的服务日志，在启动RabbitMQ 服务的时候会打印相关信息。如下所示，其中的“config file(s)”为目前的配置文件所在的路径。  
-![config_files](../images/mq/2024-02-06_config文件路径.png ':size=50%')
+![config_files](../images/rabbitmq/2024-02-06_config文件路径.png ':size=50%')
 
 在实际应用中，可能会遇到明明设置了相应的配置却没有生效的情况，也许是RabbitMQ 启动时并没有能够成功加载到相应的配置文件，可以查看日志中“config file(s)”是否有 **(not found)** 字样。  
 如果看到有“not found”标识，那么可以检查“config file(s)”的路径中有没有相关的配置文件，或者检查配置文件的地址是否设置正确（ 通过RABBITMQ_CONFIG_FILE 变量或者rabbitmq-env.conf 文件设置）。  
@@ -897,7 +897,7 @@ MNESIA_BASE=/apps/dbdat/rabbitmq/mnesia
 
 2. 通过查看进程信息的方式来检查配置文件的位置。  
 通过ps aux|grep rabbitmq 命令查看到RabbitMQ 进程的信息，如果rabbitmq.config 文件不处于默认的路径中，则会有 -config 选项标记正在使用的路径。如下所示：  
-![config_progress](../images/mq/2024-02-06_通过进程查看config.png ':size=50%')
+![config_progress](../images/rabbitmq/2024-02-06_通过进程查看config.png ':size=50%')
 
 #### 配置项
 一个极简的rabbitmq.config 文件配置如以下代码所示（注意包含尾部的点号），该配置将RabbitMQ 监听AMQP 0-9-1 客户端连接的默认端口号从5672 修改为5673：

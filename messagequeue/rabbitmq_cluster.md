@@ -1132,10 +1132,40 @@ RabbitMQ 中主要的元数据是queues、exchanges 和bindings，可以分别�
 元数据一致性检测程序可以通过/api/definitions 的HTTP API 接口获取集群的元数据信息，通过解析之后与数据库中的记录一一比对，查看是否有不一致的地方。
 
 
+---
 
-
+**RabbitMQ 可以通过3 种方式实现分布式部署：集群、Federation 和Shovel。这3 种方式不是互斥的，可以根据需要选择其中的一种或者以几种方式的组合来达到分布式部署的目的。Federation 和Shovel 可以为RabbitMQ 的分布式部署提供更高的灵活性，但同时也提高了部署的复杂性。**
 
 ## Federation
+Federation 插件的设计目标是使RabbitMQ 在不同的Broker 节点之间进行消息传递而无须建立集群，该功能在很多场景下都非常有用：
+- Federation 插件能够在不同管理域（可能设置了不同的用户和vhost，也可能运行在不同版本的RabbitMQ 和Erlang 上）中的Broker 或者集群之间传递消息。
+- Federation 插件基于AMQP 0-9-1 协议在不同的Broker 之间进行通信，并设计成能够容忍不稳定的网络连接情况。
+- 一个Broker 节点中可以同时存在联邦交换器（或队列）或者本地交换器（或队列），只需要对特定的交换器（或队列）创建Federation 连接（Federation link）。
+- Federation 不需要在N 个Broker 节点之间创建O(N2)个连接（尽管这是最简单的使用方式），这也就意味着Federation 在使用时更容易扩展。
+
+Federation 插件可以让多个交换器或者多个队列进行联邦。一个联邦交换器（federated exchange）或者一个联邦队列（federated queue）接收上游（upstream）的消息，这里的上游是指位于其他Broker 上的交换器或者队列。联邦交换器能够将原本发送给上游交换器（upstream exchange）的消息路由到本地的某个队列中；联邦队列则允许一个本地消费者接收到来自上游队列（upstream queue）的消息。
+
+### 联邦交换器
+假设有broker1 部署在北京，broker2 部署在上海，而broker3 部署在广州，彼此之间相距甚远，网络延迟是一个不得不面对的问题。  
+有一个在广州的业务ClientA 需要连接brokerA，并向其中的交换器exchangeA 发送消息，此时的网络延迟很小，ClientA 可以迅速将消息发送至exchangeA 中，就算在开启了publisher confirm 机制或者事务机制的情况下，也可以迅速收到确认信息。此时又有一个在北京的业务ClientB 需要向exchangeA 发送消息，那么ClientB 与broker3 之间有很大的网络延迟，ClientB将发送消息至exchangeA 会经历一定的延迟，尤其是在开启了publisher confirm 机制或者事务机制的情况下，ClientB 会等待很长的延迟时间来接收broker3 的确认信息，进而必然造成这条发送线程的性能降低，甚至造成一定程度上的阻塞。
+
+**使用Federation 插件就以解决以上问题**  
+如下图所示，在broker3 中为交换器exchangeA（broker3 中的队列queueA 通过“rkA”与exchangeA 进行了绑定）与北京的broker1 之间建立一条单向的Federation link。此时Federation 插件会在broker1 上会建立一个同名的交换器exchangeA（这个名称可以配置，默认同名），同时建立一个内部的交换器“exchangeA→broker3 B”，并通过路由键“rkA”将这两个交换器绑定起来。这个交换器“exchangeA→broker3 B”名字中的“broker3”是集群名，可以通过rabbitmqctl set_cluster_name {new_name}命令进行修改。与此同时Federation 插件还会在broker1 上建立一个队列“federation: exchangeA→broker3 B”，并与交换器“exchangeA→broker3 B”进行绑定。Federation 插件会在队列“federation: exchangeA→broker3 B”与broker3 中的交换器exchangeA 之间建立一条AMQP 连接来实时地消费队列“federation: exchangeA→broker3 B”中的数据。这些操作都是内部的，对外部业务客户端来说这条Federation link 建立在broker1 的exchangeA 和broker3 的exchangeA 之间。  
+![federation_link](../images/rabbitmq/2024-03-30_federation_link.png) _建立Federation link_  
+部署在北京的业务ClientB 可以连接broker1 并向exchangeA 发送消息，这样ClientB 可以迅速发送完消息并收到确认信息，而之后消息会通过Federation link 转发到broker3 的交换器exchangeA 中。最终消息会存入broker3 的与exchangeA 绑定的队列queueA 中，消费者最终可以消费队列queueA 中的消息。  
+经过Federation link 转发的消息会带有特殊的headers 属性标记。例如向broker1 中的交换器exchangeA 发送一条内容为“federation test payload.”的持久化消息，之后可以在broker3 中的队列queueA 中消费到这条消息，如下图：  
+![federation_headers](../images/rabbitmq/2024-03-30_federation_headers.png)
+
+上图 _建立Federation link_ 中broker1 的队列“federation: exchangeA -> broker3 B”是一个相对普通的队列，可以直接通过客户端进行消费。假设此时还有一个客户端ClientD 通过Basic.Consume 来消费队列“federation: exchangeA→broker3 B”的消息，那么发往broker1 中exchangeA 的消息会有一部分（一半）被ClientD 消费掉，而另一半会发往broker3 的exchangeA。所以如果业务应用有要求所有发往broker1 中exchangeA 的消息都要转发至broker3 的exchangeA 中，此时就要注意队列“federation: exchangeA→broker3 B”不能有其他的消费者；而对于“异地均摊消费”这种特殊需求，队列“federation: exchangeA→broker3 B”这种天生特性提供了支持。对于broker1 的交换器exchangeA 而言，它是一个普通的交换器，可以创建一个新的队列绑定它，对它的用法没有什么特殊之处。
+
+一个federated exchange 同样可以成为另一个交换器的upstream exchange。例如将broker2 作为broker1 的联邦交换器，再将broker3 作为broker2 的联邦交换器，此时broker2 即时联邦交换器又是上游交换器。  
+两方的交换器可以互为federated exchange 和upstream exchange。其中参数“max_hops=1”表示一条消息最多被转发的次数为1。如下图：  
+![mutual_federated_exchange](../images/rabbitmq/2024-03-30_mutual_federated_exchange.png) _两方的交换器互为federated exchange 和upstream exchange_
+
+对于联邦交换器而言，还有更复杂的拓扑逻辑部署方式。如下图：  
+![federation_complex_topology](../images/rabbitmq/2024-03-30_federation_complex_topology.png)
+
+<span style="color: red;font-weight: bold;">Tips</span>：对于默认的交换器（每个vhost 下都会默认创建一个名为“”的交换器）和内部交换器而言，不能对其使用Federation 的功能。
 
 
 ## Shovel

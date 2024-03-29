@@ -704,6 +704,435 @@ rabbitmqctl list_queues -p / -q | awk '{if($2>0) print $0}'
 
 
 ## 集群监控
+集群监控可以提供运行时的数据为应用提供参考依据、迅速定位问题、提供预防及告警等功能，增强了整体服务的鲁棒性。  
+RabbitMQ Management 插件就能提供一定的监控功能，Web 管理界面提供了很多的统计值信息：如发送速度、确认速度、消费速度、消息总数、磁盘读写速度、句柄数、Socket 连接数、Connection 数、Channel 数、内存信息等。虽然RabbitMQ Management 插件提供的监控页面是相对完善的，但是难以和公司内部系统平台关联。
+
+### 通过HTTP API 接口提供监控数据
+假设集群中一共有4 个节点node1、node2、node3 和node4，有一个交换器exchange 通过同一个路由键“rk”绑定了3 个队列queue1、queue2 和queue3。  
+集群节点的信息可以通过/api/nodes 接口来获取。有关从/api/nodes 接口中获取到数据的结构可以参考附录B。
+
+收集数据的代码示例：  
+创建ClusterNode 类
+```java
+public class ClusterNode {
+    private long diskFree;//磁盘空闲
+    private long diskFreeLimit;
+    private long fdUsed;//句柄使用数
+    private long fdTotal;
+    private long socketsUsed;//Socket 使用数
+    private long socketsTotal;
+    private long memoryUsed;//内存使用值
+    private long memoryLimit;
+    private long procUsed;//Erlang 进程使用数
+    private long procTotal;
+    @Override
+    public String toString() {
+        return "{disk_free="+diskFree+", disk_free_limit="+diskFreeLimit+", fd_used="+fdUsed+", "+
+        "fd_total="+fdTotal+", sockets_used="+socketsUsed+", sockets_total="+socketsTotal+", "+
+        "mem_used="+memoryUsed+", mem_limit="+memoryLimit+", proc_used="+procUsed+", proc_total="+procTotal+"}";
+    }
+    //省略Getter 和Setter 方法
+}
+```
+
+封装HTTP GET
+```java
+public class HttpUtils {
+    public static String httpGet(String url, String username, String password) throws IOException {
+        HttpClient client = new HttpClient();
+        client.getState().setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+        GetMethod getMethod = new GetMethod(url);
+        int ret = client.executeMethod(getMethod);
+        String data = getMethod.getResponseBodyAsString();
+        System.out.println(data);
+        return data;
+    }
+}
+```
+
+采集集群节点数据
+```java
+public static List<ClusterNode> getClusterData(String ip, int port, String username, String password) {
+    List<ClusterNode> list = new ArrayList<ClusterNode>();
+    String url = "http://" + ip + ":" + port + "/api/nodes";
+    System.out.println(url);
+    try {
+        String urlData = HttpUtils.httpGet(url, username, password);
+        parseClusters(urlData,list);
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+    System.out.println(list);
+    return list;
+}
+private static void parseClusters(String urlData, List<ClusterNode> list) {
+    JsonParser parser = new JsonParser();
+    JsonArray jsonArray = (JsonArray) parser.parse(urlData);
+    for(int i=0;i<jsonArray.size();i++) {
+        JsonObject jsonObjectTemp = jsonArray.get(i).getAsJsonObject();
+        ClusterNode cluster = new ClusterNode();
+        cluster.setDiskFree(jsonObjectTemp.get("disk_free").getAsLong());
+        cluster.setDiskFreeLimit(jsonObjectTemp. get("disk_free_ limit").
+        getAsLong());
+        cluster.setFdUsed(jsonObjectTemp.get("fd_used").getAsLong());
+        cluster.setFdTotal(jsonObjectTemp.get("fd_total").getAsLong());
+        cluster.setSocketsUsed(jsonObjectTemp.get("sockets_used"). getAsLong());
+        cluster.setSocketsTotal(jsonObjectTemp.get("sockets_total").getAsLong());
+        cluster.setMemoryUsed(jsonObjectTemp.get("mem_used").getAsLong());
+        cluster.setMemoryLimit(jsonObjectTemp.get("mem_limit").getAsLong());
+        cluster.setProcUsed(jsonObjectTemp.get("proc_used").getAsLong());
+        cluster.setProcTotal(jsonObjectTemp.get("proc_total").getAsLong());
+        list.add(cluster);
+    }
+}
+```
+
+对于交换器而言的数据采集可以调用/api/exchanges/vhost/name 接口，比如需要调用虚拟主机为默认的“/”、交换器名称为exchange 的数据，只需要使用HTTP GET 方法获取http://xxx.xxx.xxx.xxx:15672/api/exchanges/%2F/exchange 的数据即可。注意，这里需要将“/”进行HTML 转义成“%2F”，否则会出错。对应的数据内容可以参考下方：
+```json
+{
+    "message_stats": {
+        "publish_in_details": {
+            "rate": 0.4//数据流入的速率
+        },
+        "publish_in": 9,//数据流入的总量
+        "publish_out_details": {
+            "rate": 1.2//数据流出的速率
+        },
+        "publish_out": 27//数据流出的总量
+    },
+    "outgoing": [],
+    "incoming": [],
+    "arguments": {},
+    "internal": false,
+    "auto_delete": false,
+    "durable": true,
+    "type": "direct",
+    "vhost": "/",
+    "name": "exchange"
+}
+```
+
+采集交换器数据
+```java
+public class Exchange {
+    private double publishInRate;
+    private long publishIn;
+    private double publishOutRate;
+    private long publishOut;
+    @Override
+    public String toString() {
+    return "{publish_in_rate=" + publishInRate + ", publish_in=" + publishIn +
+    ", publish_out_rate=" + publishOutRate + ", publish_out=" + publishOut+"}";
+    }
+    //省略Getter 和Setter 方法
+}
+public class ExchangeMonitor {
+    public static void main(String[] args) {
+        try {
+            getExchangeData("192.168.0.2", 15672, "root", "root123", "/", "exchange");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    public static Exchange getExchangeData(String ip, int port, String username,
+    String password, String vhost, String exchange) throws IOException {
+        String url = "http://" + ip + ":" + port + "/api/exchanges/"
+            + encode(vhost, "UTF-8") + "/" + encode(exchange, "UTF-8");
+        System.out.println(url);
+        String urlData = HttpUtils.httpGet(url, username, password);
+        System.out.println(urlData);
+        Exchange exchangeAns = parseExchange(urlData);
+        System.out.println(exchangeAns);
+        return exchangeAns;
+    }
+    //解析程序
+    private static Exchange parseExchange(String urlData) {
+        Exchange exchange = new Exchange();
+        JsonParser parser = new JsonParser();
+        JsonObject jsonObject = (JsonObject) parser.parse(urlData);
+        JsonObject msgStats = jsonObject.get("message_stats").getAsJsonObject();
+        double publish_in_details_rate = msgStats.get("publish_in_details").getAsJsonObject().get("rate").getAsDouble();
+        double publish_out_details_rate = msgStats.get("publish_out_details").getAsJsonObject().get("rate").getAsDouble();
+        long publish_in = msgStats.get("publish_in").getAsLong();
+        long publish_out = msgStats.get("publish_out").getAsLong();
+        exchange.setPublishInRate(publish_in_details_rate);
+        exchange.setPublishOutRate(publish_out_details_rate);
+        exchange.setPublishIn(publish_in);
+        exchange.setPublishOut(publish_out);
+        return exchange;
+    }
+}
+```
+
+对于队列而言的数据采集相关的接口为/api/queues/vhost/name，对应的数据结构可以参考下方内容。代码逻辑省略。
+```json
+{
+    "consumer_details": [],
+    "incoming": [],
+    "deliveries": [],
+    "messages_details": { "rate": 0 },
+    "messages": 12,
+    "messages_unacknowledged_details": { "rate": 0 },
+    "messages_unacknowledged": 0,
+    "messages_ready_details": { "rate": 0 },
+    "messages_ready": 12,
+    "reductions_details": { "rate": 0 },
+    "reductions": 577759,
+    "message_stats": { "publish_details": { "rate": 0 }, "publish": 12 },
+    "node": "rabbit@node2",
+    "arguments": {},
+    "exclusive": false,
+    "auto_delete": false,
+    "durable": true,
+    "vhost": "/",
+    "name": "queue1",
+    "message_bytes_paged_out": 0,
+    "messages_paged_out": 0,
+    "backing_queue_status": {
+        "mode": "default", "q1": 0, "q2": 0,
+        "delta": ["delta", "undefined", 0, 0, "undefined" ],
+        "q3": 0, "q4": 12, "len": 12, "target_ram_count": "infinity",
+        "next_seq_id": 12,
+        "avg_ingress_rate": 0.0501007133625864,
+        "avg_egress_rate": 0, "mirror_seen": 0,
+        "avg_ack_ingress_rate": 0, "avg_ack_egress_rate": 0,
+        "mirror_senders": 0
+    },
+    "head_message_timestamp": null,
+    "message_bytes_persistent": 28,
+    "message_bytes_ram": 28,
+    "message_bytes_unacknowledged": 0,
+    "message_bytes_ready": 28,
+    "message_bytes": 28,
+    "messages_persistent": 12,
+    "messages_unacknowledged_ram": 0,
+    "messages_ready_ram": 12,
+    "messages_ram": 12,
+    "garbage_collection": {
+        "minor_gcs": 492, "fullsweep_after": 65535, "min_heap_size": 233,
+        "min_bin_vheap_size": 46422, "max_heap_size": 0
+    },
+    "state": "running",
+    "recoverable_slaves": [ "rabbit@node1" ],
+    "synchronised_slave_nodes": [ "rabbit@node1" ],
+    "slave_nodes": [ "rabbit@node1" ],
+    "memory": 143272,
+    "consumer_utilisation": null,
+    "consumers": 0,
+    "exclusive_consumer_tag": null,
+    "policy": "policy1"
+}
+```
+
+数据采集完之后并没有结束，采集程序通过定时调用HTTP API 接口获取JSON 数据，然后进行JSON 解析之后再进行持久化处理。对于这种基于时间序列的数据非常适合使用OpenTSDB来进行存储。监控管理系统可以根据用户的检索条件来从OpenTSDB 中获取相应的数据并展示到页面之中。监控管理系统本身还可以具备报表、权限管理等功能，同时也可以实时读取所采集的数据，对其进行分析处理，对于异常的数据需要及时报告给相应的人员。  
+OpenTSDB：基于Hbase 的分布式的，可伸缩的时间序列数据库。主要用途就是做监控系统，比如收集大规模集群（包括网络设备、操作系统、应用程序）的监控数据并进行存储、查询。
+
+### 通过客户端提供监控数据
+除了HTTP API 接口可以提供监控数据，Java 版客户端（3.6.x 版本开始）中Channel 接口中也提供了两个方法来获取数据。方法定义如下：
+```java
+//查询队列中的消息个数，可以为监控消息堆积的情况提供数据
+long messageCount(String queue) throws IOException;
+//查询队列中的消费者个数，可以为监控消费者的情况提供数据
+long consumerCount(String queue) throws IOException;
+```
+
+也可以通过连接的状态进行监控。Java 客户端中Connection 接口提供了addBlockedListener（BlockedListener listener）方法（用来监听连接阻塞信息）和addShutdownListener（ShutdownListener listener）方法（用来监听连接关闭信息）。  
+监听Connection 的状态：
+```java
+try {
+    Connection connection = connectionFactory.newConnection();
+    connection.addShutdownListener(new ShutdownListener() {
+        public void shutdownCompleted(ShutdownSignalException cause) {
+            //处理并记录连接关闭事项
+        }
+    });
+    connection.addBlockedListener(new BlockedListener() {
+        public void handleBlocked(String reason) throws IOException {
+            //处理并记录连接阻塞事项
+        }
+        public void handleUnblocked() throws IOException {
+            //处理并记录连接阻塞取消事项
+        }
+    });
+    Channel channel = connection.createChannel();
+    long msgCount = channel.messageCount("queue1");
+    long consumerCount = channel.consumerCount("queue1");
+    //记录msgCount 和consumerCount
+} catch (IOException e) {
+    e.printStackTrace();
+} catch (TimeoutException e) {
+    e.printStackTrace();
+}
+```
+
+自定义埋点数据：
+```java
+public static volatile int successCount = 0;//记录发送成功的次数
+public static volatile int failureCount = 0;//记录发送失败的次数
+//下面代码内容包含在某方法体内
+try {
+    channel.confirmSelect();
+    channel.addReturnListener(new ReturnListener() {
+        public void handleReturn(int replyCode, String replyText, String exchange, String routingKey, 
+            AMQP.BasicProperties properties, byte[] body) throws IOException {
+            failureCount++;
+        }
+    });
+    channel.basicPublish("","",true,MessageProperties.PERSISTENT_TEXT_PLAIN, "msg".getBytes());
+    if (channel.waitForConfirms() == true) {
+        successCount++;
+    } else {
+        failureCount++;
+    }
+} catch (IOException e) {
+    e.printStackTrace();
+    failureCount++;
+} catch (InterruptedException e) {
+    e.printStackTrace();
+    failureCount++;
+}
+```
+
+上面的代码中只是简单地对successCount 和failureCount 进行累加操作，这里推荐引入metrics 工具（比如com.codahale.metrics.*）来进行埋点，同样的方式也可以统计消费者消费成功的条数和消费失败的条数。
+
+### 检测RabbitMQ 服务是否健康
+通过某些工具或方法可以检测RabbitMQ 进程是否在运行（如ps aux | grep rabbitmq），或者5672 端口是否开启（如telnet xxx.xxx.xxx.xxx 5672），但是这样依旧不能真正地评判RabbitMQ 是否还具备服务外部请求的能力。  
+这里就需要使用AMQP 协议来构建一个类似于TCP 协议中的Ping 的检测程序。当这个测试程序与RabbitMQ 服务无法建立TCP 协议层面的连接，或者无法构建AMQP 协议层面的连接，再或者构建连接超时，则可判定RabbitMQ 服务处于异常状态而无法正常为外部应用提供相应的服务。
+
+AMQP-ping 测试程序：
+```java
+/**
+* AMQP-ping 测试程序返回的状态
+*/
+enum PING_STATUS{
+    OK,//正常
+    EXCEPTION//异常
+}
+public class AMQPPing {
+    private static String host = "localhost";
+    private static int port = 5672;
+    private static String vhost = "/";
+    private static String username = "guest";
+    private static String password = "guest";
+    /**
+    * 读取rmq_cfg.properties 中的内容，如果没有配置相应的项则采用默认值
+    */
+    static {
+        Properties properties = new Properties();
+        try {
+            properties.load(AMQPPing.class.getClassLoader().getResourceAsStream("rmq_cfg.properties"));
+            host = properties.getProperty("host");
+            port = Integer.valueOf(properties.getProperty("port"));
+            vhost = properties.getProperty("vhost");
+            username = properties.getProperty("username");
+            password = properties.getProperty("password");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    /**
+    * AMQP-ping 测试程序，如有IOException 或者TimeoutException，则说明RabbitMQ
+    * 服务出现异常情况
+    */
+    public static PING_STATUS checkAMQPPing(){
+        PING_STATUS ping_status = PING_STATUS.OK;
+        ConnectionFactory connectionFactory = new ConnectionFactory();
+        connectionFactory.setHost(host);
+        connectionFactory.setPort(port);
+        connectionFactory.setVirtualHost(vhost);
+        connectionFactory.setUsername(username);
+        connectionFactory.setPassword(password);
+        Connection connection = null;
+        Channel channel = null;
+        try {
+            connection = connectionFactory.newConnection();
+            channel = connection.createChannel();
+        } catch (IOException | TimeoutException e ) {
+            e.printStackTrace();
+            ping_status = PING_STATUS.EXCEPTION;
+        } finally {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return ping_status;
+    }
+}
+```
+
+示例中涉及rmq_cfg.properties 配置文件，这个文件用来灵活地配置与RabbitMQ 服务的连接所需的连接信息，包括IP 地址、端口号、vhost、用户名和密码等。如果没有配置相应的项则可以采用默认的值。  
+监控应用时，可以定时调用AMQPPing.checkAMQPPing()方法来获取检测信息，AMQPPing 类能够检测RabbitMQ 是否能够接收新的请求和构造AMQP 信道。
+
+RabbitMQ Management 插件提供了/api/aliveness-test/vhost 的HTTP API 形式的接口，这个接口通过三个步骤来验证RabbitMQ 服务的健康性：
+
+    （1）创建一个以“aliveness-test”为名称的队列来接收测试消息。
+    （2）用队列名称，即“aliveness-test”作为消息的路由键，将消息发往默认交换器。
+    （3）到达队列时就消费该消息，否则就报错。
+
+这个HTTP API 接口背后的检测程序也称之为aliveness-test，其运行在Erlang 虚拟机内部，因此它不会受到网络问题的影响。如果在虚拟机外部，则网络问题可能会阻止外部客户端连接到RabbitMQ 的5672 端口。aliveness-test 程序不会删除创建的队列，对于频繁调用这个接口的情况，它可以避免数以千计的队列元数据事务对Mnesia 数据库造成巨大的压力。如果RabbitMQ 服务完好，调用/api/aliveness-test/vhost 接口会返回{"status":"ok"}，HTTP 状态码为200。
+
+AlivenessTest 程序：
+```java
+/**
+* AlivenessTest 程序返回的状态
+* OK 表示健康，EXCEPTION 表示异常
+*/
+enum ALIVE_STATUS{
+    OK,
+    EXCEPTION
+}
+public class AlivenessTest {
+    public static ALIVE_STATUS checkAliveness(String url, String username, String password){
+        ALIVE_STATUS alive_status = ALIVE_STATUS.OK;
+        HttpClient client = new HttpClient();
+        client.getState().setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+        GetMethod getMethod = new GetMethod(url);
+        String data = null;
+        int ret = -1;
+        try {
+            ret = client.executeMethod(getMethod);
+            data = getMethod.getResponseBodyAsString();
+            if (ret != 200 || !data.equals("{\"status\":\"ok\"}")) {
+                alive_status = ALIVE_STATUS.EXCEPTION;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            alive_status = ALIVE_STATUS.EXCEPTION;
+        }
+        return alive_status;
+    }
+}
+//调用示例
+//AlivenessTest.checkAliveness("http://192.168.0.2:15672/api/aliveness-test/%2F","root", "root123");
+```
+
+aliveness-test 程序配合前面的AMQPPing 程序一起使用可以从内部和外部这两个方面来全面地监控RabbitMQ 服务。  
+HTTP API 接口中还有另外两个接口/api/healthchecks/node 和/api/healthchecks/node/node，这两个HTTP API 接口分别表示对当前节点或指定节点进行基本的健康检查，包括RabbitMQ 应用、信道、队列是否运行正常，是否有告警产生等。
+
+### 元数据管理与监控
+删除队列、删除交换器，或者修改了绑定信息，再或者是胡乱建立了一个队列绑定到现有的一个交换器中，同时又没有消费者订阅消费此队列，从而留下消
+息堆积的隐患等都会对使用RabbitMQ 服务的业务应用造成影响。所以对于RabbitMQ 元数据的管理与监控也尤为重要。  
+许多应用场景是在业务逻辑代码中创建相应的元数据资源（交换器、队列及绑定关系）并使用。对于排他的、自动删除的这类非高可靠性要求的元数据资源可以在一定程度上忽略元数据变更的影响。但是对于两个非常重要的且通过消息中间件交互的业务应用，在使用相应的元数据资源时最好进行相应的管控，如果一方或者其他方肆意变更所使用的元数据，必然对另一方造成不小的损失。管控的介入自然会降低消息中间件的灵活度，但是可以增强系统的可靠性。比如提供给业务方使用的用户只有可读和可写的权限。
+
+RabbitMQ 中在创建元数据资源的时候是以一种声明的形式完成的：无则创建、有则不变，不过在对应的元数据存在的情况下，对其再次声明时使用不同的属性会报出相应的错误信息。  
+可以利用这一特性来监控元数据的变更，通过定时程序来将记录中的元数据信息重新声明一次，查看是否有异常报出。不过这种方法非常具有局限性，只能增加元数据的信息而不能减少。
+
+**下面提供一个简单的元数据管控和监控的思路：**  
+所有的业务应用都需要通过元数据审核系统来申请变更（创建、查询、修改及删除）相应的元数据信息。在申请动作完成之后，由专门的人员进行审批，之后在数据库中存储和在RabbitMQ 集群中创建相应的元数据，这两个步骤可以同时进行，而且也无须为这两个动作添加强一致性的事务逻辑。在数据库和RabbitMQ 集群之间用一个元数据一致性校验程序来检测元数据不一致的地方，然后将不一致的数据上送到监控管理系统。监控管理系统中可以显示元数据不一致的记录信息，也可以以告警的形式推送出来，然后相应的管理人员可以选择手动或者自动地进行元数据修正。这里的不一致有可能是由于数据库的记录未被正确及时地更新，也有可能是RabbitMQ 集群中元数据被异常篡改。元数据修正需慎之又慎，在整个系统修正逻辑完备之前，建议优先采用人工的方式，毕竟不一致的元数据仅占少数，人工修正的工作量并不太大。
+
+RabbitMQ 中主要的元数据是queues、exchanges 和bindings，可以分别建立三张表，参考附录A。
+- Table 1：队列信息表，名称为rmq_queues。列名有name、vhost、durable、auto_delete、arguments、cluster_name、description。
+- Table 2：交换器信息表，名称为rmq_exchanges。列名有name、vhost、type、durable、auto_delete、internal、arguments、cluster_name、description。
+- Table 3：绑定信息表，名称为rmq_bindings。列名有source、vhost、destination、destination_type、routing_key、arguments、cluster_name、description。
+
+元数据一致性检测程序可以通过/api/definitions 的HTTP API 接口获取集群的元数据信息，通过解析之后与数据库中的记录一一比对，查看是否有不一致的地方。
+
+
+
 
 
 ## Federation

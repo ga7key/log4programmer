@@ -1319,3 +1319,28 @@ rabbitmqctl set_policy --apply-to queues p2 "^queue" '{"federation-upstream":"f1
 Shovel 能够可靠、持续地从一个Broker 中的队列（作为源端，即source）拉取数据并转发至另一个Broker 中的交换器（作为目的端，即destination）。作为源端的队列和作为目的端的交换器可以同时位于同一个Broker 上，也可以位于不同的Broker 上。  
 Shovel 可以翻译为“铲子”，是一种比较形象的比喻，这个“铲子”可以将消息从一方“挖到”另一方。Shovel 的行为就像优秀的客户端应用程序能够负责连接源和目的地、负责消息的读写及负责连接失败问题的处理。
 
+Shovel 的主要优势在于：
+- 松耦合。Shovel 可以移动位于不同管理域中的Broker（或者集群）上的消息，这些Broker（或者集群）可以包含不同的用户和vhost，也可以使用不同的RabbitMQ 和Erlang 版本。
+- 支持广域网。Shovel 插件同样基于AMQP 协议在Broker 之间进行通信，被设计成可以容忍时断时续的连通情形，并且能够保证消息的可靠性。
+- 高度定制。当Shovel 成功连接后，可以对其进行配置以执行相关的AMQP 命令。
+
+### Shovel 的原理
+![shovel_structure](../images/rabbitmq/2024-03-31_shovel_structure.png) _Shovel的结构_  
+上图有两个Broker：broker1（IP 地址：192.168.0.2）和broker2（IP 地址：192.168.0.3）。broker1 中有交换器exchange1 和队列queue1，且这两者通过路由键“rk1”进行绑定；broker2 中有交换器exchange2 和队列queue2，且这两者通过路由键“rk2”进行绑定。在队列queue1 和交换器exchange2 之间配置一个Shovel link，当一条内容为“shovel test payload”的消息从客户端发送至交换器exchange1 的时候，这条消息会经过数据流转最后存储在队列queue2 中。如果在配置Shovel link 时设置了add_forward_headers 参数为true，则在消费到队列queue2 中这条消息的时候会有特殊的headers 属性标记，如下图。  
+![shovel_message_details](../images/rabbitmq/2024-03-31_shovel_message_details.png)
+
+通常情况下，使用Shovel 时配置源节点的队列作为源端，目标节点的交换器作为目的端。  
+同样可以将目标节点的队列配置为目的端，如下图。虽然看起来队列queue1 是通过Shovel link 直接将消息转发至queue2 的，其实中间也是经由broker2 的交换器转发，只不过这个交换器是默认的交换器而已。  
+![shovel_queue_destination](../images/rabbitmq/2024-03-31_shovel_queue_destination.png) _将队列配置为目的端_
+
+如下图，配置源节点的交换器为源端也是可行的。虽然看起来交换器exchange1 是通过Shovel link 直接将消息转发至exchange2 上的，实际上在broker1 中会新建一个队列（名称由RabbitMQ 自定义，比如中的“amq.gen-ZwolUsoUchY6a7xaPyrZZH”）并绑定exchange1，消息从交换器exchange1 过来先存储在这个队列中，然后Shovel 再从这个队列中拉取消息进而转发至交换器exchange2。  
+![shovel_exchange_source](../images/rabbitmq/2024-03-31_shovel_exchange_source.png) _配置交换器为源端_
+
+以上Shovel 结构中的broker1、broker2 中的exchange1、queue1、exchange2 及queue2 都可以在Shovel 成功连接源端或者目的端Broker 之后再第一次创建（执行一系列相应的AMQP 配置声明时），它们并不一定需要在Shovel link 建立之前创建。Shovel 可以为源端或者目的端配置多个Broker 的地址，这样可以使得源端或者目的端的Broker 失效后能够尝试重连到其他Broker 之上（随机挑选）。可以设置reconnect_delay 参数以避免由于重连行为导致的网络泛洪，或者可以在重连失败后直接停止连接。针对源端和目的端的所有配置声明会在重连成功之后被重新发送。
+
+### Shovel 的使用
+
+
+
+
+### 案例：消息堆积的治理

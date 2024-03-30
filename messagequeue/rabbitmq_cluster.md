@@ -1167,7 +1167,155 @@ Federation 插件可以让多个交换器或者多个队列进行联邦。一个
 
 <span style="color: red;font-weight: bold;">Tips</span>：对于默认的交换器（每个vhost 下都会默认创建一个名为“”的交换器）和内部交换器而言，不能对其使用Federation 的功能。
 
+### 联邦队列
+联邦队列（federated queue）可以在多个Broker 节点（或者集群）之间为单个队列提供均衡负载的功能。一个联邦队列可以连接一个或者多个上游队列（upstream queue），并从这些上游队列中获取消息以满足本地消费者消费消息的需求。
+
+如下图所示，位于两个Broker 中的几个联邦队列（灰色）和非联邦队列（白色）。队列queue1 和queue2 原本在broker2 中，由于某种需求将其配置为federated queue 并将broker1 作为upstream。Federation 插件会在broker1 上创建同名的队列queue1 和queue2，与broker2 中的队列queue1 和queue2 分别建立两条单向独立的Federation link。当有消费者ClinetA 连接broker2 并通过Basic.Consume 消费队列queue1（或queue2）中的消息时，如果队列queue1（或queue2）中本身有若干消息堆积，那么ClientA 直接消费这些消息，此时broker2 中的queue1（或queue2）并不会拉取broker1 中的queue1（或queue2）的消息；如果队列queue1（或queue2）中没有消息堆积或者消息被消费完了，那么它会通过Federation link 拉取在broker1 中的上游队列queue1（或queue2）中的消息（如果有消息），然后存储到本地，之后再被消费者ClientA 进行消费。  
+![_federated_queue](../images/rabbitmq/2024-03-30_federated_queue.png)
+
+消费者既可以消费broker2 中的队列，又可以消费broker1 中的队列，Federation 的这种分布式队列的部署可以提升单个队列的容量。如果在broker1 一端部署的消费者来不及消费队列queue1 中的消息，那么broker2 一端部署的消费者可以为其分担消费，也可以达到某种意义上的负载均衡。
+
+与federated exchange 不同，如果两个队列互为联邦队列，一条消息可以在联邦队列间转发无限次。  
+队列中的消息除了被消费，还会转向有多余消费能力的一方，如果这种“多余的消费能力”在broker1 和broker2 中来回切换，那么消费也会在broker1 和broker2 中的队列queue 中来回转发。  
+可以在其中一个队列上发送一条消息“msg”，然后再分别创建两个消费者ClientB 和ClientC 分别连接broker1 和broker2，并消费队列queue 中的消息，但是并不需要确认消息（消费完消息不需要调用Basic.Ack）。来回开启/关闭ClientB 和ClientC 可以发现消息“msg”会在broker1 和broker2 之间串来串去。
+
+如下图所示，broker2 的队列queue 没有消息堆积或者消息被消费完之后并不能通过Basic.Get 来获取broker1 中队列queue 的消息。因为Basic.Get 是一个异步的方法，如果要从broker1 中队列queue 拉取消息，必须要阻塞等待通过Federation link 拉取消息存入broker2 中的队列queue 之后再消费消息，所以对于federated queue 而言只能使用Basic.Consume 进行消费。
+
+![federated_queue_transitivity](../images/rabbitmq/2024-03-30_federated_queue_transitivity.png)
+
+federated queue 并不具备传递性。如上图所示，队列queue2 作为federated queue 与队列queue1 进行联邦，而队列queue2 又作为队列queue3 的upstream queue，但是这样队列queue1 与queue3 之间并没有产生任何联邦的关系。如果队列queue1 中有消息堆积，消费者连接broker3 消费queue3 中的消息，无论queue3 处于何种状态，这些消费者都消费不到queue1 中的消息，除非queue2 有消费者。
+
+<span style="color: red;font-weight: bold;">Tips</span>：理论上可以将一个federated queue 与一个federated exchange 绑定起来，不过这样会导致一些不可预测的结果，如果对结果评估不足，建议慎用这种搭配方式。
+
+### Federation 的使用
+为了能够使用Federation 功能，需要配置以下2 个内容：
+1. 需要配置一个或多个upstream，每个upstream 均定义了到其他节点的Federation link。这个配置可以通过设置运行时的参数（Runtime Parameter）来完成，也可以通过federation management 插件来完成。
+2. 需要定义匹配交换器或者队列的一种/多种策略（Policy）。
+
+Federation 插件默认在RabbitMQ 发布包中， 执行rabbitmq-plugins enable rabbitmq_federation 命令可以开启Federation 功能，因为Federation 内部基于AMQP 协议拉取数据，所以在开启rabbitmq_federation 插件的时候，默认会开启amqp_client 插件。示例如下：
+```bash
+[root@node1 ~]# rabbitmq-plugins enable rabbitmq_federation
+The following plugins have been enabled:
+  amqp_client
+  rabbitmq_federation
+Applying plugin configuration to rabbit@node1... started 2 plugins.
+```
+
+同时，如果要开启Federation 的管理插件，需要执行rabbitmq-plugins enable rabbitmq_federation_management 命令，示例如下：
+```bash
+[root@node1 ~]# rabbitmq-plugins enable rabbitmq_federation_management
+The following plugins have been enabled:
+  cowlib
+  cowboy
+  rabbitmq_web_dispatch
+  rabbitmq_management_agent
+  rabbitmq_management
+  rabbitmq_federation_management
+Applying plugin configuration to rabbit@node1... started 6 plugins.
+```
+
+开启rabbitmq_federation_management 插件之后，在RabbitMQ 的管理界面中“Admin”的右侧会多出“Federation Status”和“Federation Upstreams”两个Tab 页。  
+rabbitmq_federation_management 插件依附于rabbitmq_management 插件，所以开启rabbitmq_federation_management 插件的同时默认也会开启rabbitmq_management 插件。
+
+<span style="color: red;font-weight: bold;">Tips</span>：当需要在集群中使用Federation 功能的时候，集群中所有的节点都应该开启Federation 插件。
+
+有关Federation upstream 的信息全部都保存在RabbitMQ 的Mnesia 数据库中，包括用户信息、权限信息、队列信息等。在Federation 中存在三种级别的配置：
+1. Upstreams：每个upstream 用于定义与其他Broker 建立连接的信息。
+2. Upstream sets：每个upstream set 用于对一系列使用Federation 功能的upstream 进行分组。
+3. Policies：每一个Policy 会选定出一组交换器，或者队列，亦或者两者皆有而进行限定，进而作用于一个单独的upstream 或者upstream set 之上。
+
+在简单使用场景下，基本上可以忽略upstream set 的存在，因为存在一种名为“all”并且隐式定义的upstream set，所有的upstream 都会添加到这个set 之中。Upstreams 和Upstream sets 都属于运行时参数，就像交换器和队列一样，每个vhost 都持有不同的参数和策略的集合。
+
+Federation 相关的运行时参数和策略都可以通过下面三种方式进行设置：
+1. 通过rabbitmqctl 工具。
+2. 通过RabbitMQ Management 插件提供的HTTP API 接口。
+3. 通过rabbitmq_federation_management 插件提供的Web 管理界面的方式（最方便且通用）。不过基于Web 管理界面的方式不能提供全部功能，比如无法针对upstream set 进行管理。
+
+---
+
+下面就详细讲解如何正确地使用Federation 插件，以章节Federation - 联邦交换器 - _建立Federation link_ 这张图为例，讲述如何在broker1（IP 地址：192.168.0.2）和broker3（IP 地址：192.168.0.4）之间**建立federated exchange** 关系。  
+##### 第一步
+需要在broker1 和broker3 中开启rabbitmq_federation 插件，最好同时开启rabbitmq_federation_management 插件。
+
+##### 第二步
+在broker3 中定义一个upstream。
+
+**第一种**，通过rabbitmqctl 工具的方式：
+```bash
+rabbitmqctl set_parameter federation-upstream f1 '{"uri":"amqp://root:root123@192.168.0.2:5672","ack-mode":"on-confirm"}'
+```
+
+**第二种**，通过调用HTTP API 接口的方式：
+```bash
+curl -i -u root:root123 -XPUT -d '{"value":{"uri":"amqp://root:root123@192.168.0.2:5672","ack-mode":"on-confirm"}}'
+ http://192.168.0.4:15672/api/parameters/federation-upstream/%2f/f1
+```
+
+**第三种**，通过在Web 管理界面中添加的方式，在“Admin”→“Federation Upstreams”→“Add a new upstream”中创建。  
+各个参数的含义如下，括号中对应的是采用设置Runtime Parameter 或者调用HTTP API 接口的方式所对应的相关参数名称。  
+通用的参数如下：
+- Name：定义这个upstream 的名称。必填项。  
+- URI (uri) ： 定义upstream 的AMQP 连接。必填项。本示例中可以填写为amqp://root:root123@192.168.0.2:5672。  
+- Prefetch count (prefetch_count)：定义Federation 内部缓存的消息条数，即在收到上游消息之后且在发送到下游之前缓存的消息条数。  
+- Reconnect delay (reconnect-delay)：Federation link 由于某种原因断开之后，需要等待多少秒开始重新建立连接。  
+- Acknowledgement Mode (ack-mode)：定义Federation link 的消息确认方式。共有三种：  
+    ▶ on-confirm，默认方式，表示在接收到下游目标节点的确认消息（等待下游的Basic.Ack）之后再向上游发送消息确认，这个选项可以确保网络失败或者Broker 宕机时不会丢失消息，但也是处理速度最慢的选项。  
+    ▶ on-publish，表示消息发送到下游目标节点的交换器后立即向上游的源节点发送确认，这个选项可以确保在网络失败的情况下不会丢失消息，但不能确保下游的Broker 宕机时不会丢失消息。  
+    ▶ no-ack 表示无须进行消息确认，这个选项处理速度最快，但也最容易丢失消息。  
+- Trust User-ID (trust-user-id)：设定Federation 是否使用“Validated User-ID”这个功能。如果设置为false 或者没有设置，那么Federation 会忽略消息的user_id 这个属性；如果设置为true，则Federation 只会转发user_id 为上游任意有效的用户的消息。  
+“Validated User-ID”功能是指发送消息时验证消息的user_id 的属性，channel.basicPublish() 方法中有个参数是BasicProperties，这个BasicProperties 类中有个属性为userId。如果在连接Broker 时所用的用户名为“root”，当发送消息时设置的user_id 的属性为“guest”，那么这条消息会发送失败，具体报错为 406 PRECONDITION_FAILED - user_id property set to 'guest' but authenticated user was 'root'，只有当user_id 设置为“root”时这条消息才会发送成功。
+
+只适合federated exchange 的参数如下：
+- Exchange (exchange)：指定upstream exchange 的名称，默认情况下和federated exchange 同名，即图中的exchangeA。
+- Max hops (max-hops)：指定消息被丢弃前在Federation link 中最大的跳转次数。默认为1。注意即使设置max-hops 参数为大于1 的值，同一条消息也不会在同一个Broker 中出现2 次，但是有可能会在多个节点中被复制。
+- Expires (expires)：指定Federation link 断开之后，federated queue 所对应的upstream queue（即中的队列“federation: exchangeA→broker3 B”）的超时时间，默认为“none”，表示为不删除，单位为ms。这个参数相当于设置普通队列的x-expires 参数。设置这个值可以避免Federation link 断开之后，生产者一直在向broker1 中的exchangeA 发送消息，这些消息又不能被转发到broker3 中而被消费掉，进而造成broker1 中有大量的消息堆积。
+- Message TTL (message-ttl)：为federated queue 所对应的upstream queue（即图中的队列“federation: exchangeA→broker3 B”）设置，相当于普通队列的x-message-ttl 参数。默认为“none”，表示消息没有超时时间。
+- HA policy (ha-policy)：为federated queue 所对应的upstream queue（即图中的队列“federation: exchangeA→broker3 B”）设置，相当于普通队列的x-ha-policy参数，默认为“none”，表示队列没有任何HA。
+
+只适合federated queue 的参数如下：
+- Queue (queue)：执行upstream queue 的名称，默认情况下和federated queue 同名。
+
+##### 第三步
+定义一个Policy 用于匹配交换器exchangeA，并使用第二步中所创建的upstream。
+
+**第一种**，通过rabbitmqctl 工具的方式，如下（定义所有以“exchange”开头的交换器作为federated exchange）：
+```bash
+rabbitmqctl set_policy --apply-to exchanges p1 "^exchange" '{"federationupstream":"f1"}'
+```
+
+**第二种**，通过HTTP API 接口的方式，如下：
+```bash
+curl -i -u root:root123 -XPUT -d '{"pattern":"^exchange","definition":{"federation-upstream":"f1"},"apply-to":"exchanges"} 
+'http://192.168.0.4:15672/api/policies/%2F/p1
+```
+
+**第三种**，通过在Web 管理界面中添加的方式，在 “Admin”→“Policies”→“Add/ update a policy”中创建。
+
+创建Federation link后，可以在Web 管理界面中“Admin”→“Federation Status”→“Running Links”查看到相应的链接。  
+还可以通过rabbitmqctl eval 'rabbit_federation_status:status().'命令来查看相应的Federation link。示例如下：
+```bash
+[root@node2 ~]# rabbitmqctl eval 'rabbit_federation_status:status().'
+[[{exchange,<<"exchangeA">>},
+  {upstream_exchange,<<"exchangeA">>},
+  {type,exchange},
+  {vhost,<<"/">>},
+  {upstream,<<"f1">>},
+  {id,<<"fad51c1713586d453b7dc9cd1a28641192a94f41">>},
+  {status,running},
+  {local_connection,<<"<rabbit@node2.1.15217.10>">>},
+  {uri,<<"amqp://192.168.0.2:5672">>},
+  {timestamp,{{2017,10,15},{0,7,48}}}]]
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：通常情况下，针对每个upstream 都会有一条Federation link，该Federation link 对应到一个交换器上。例如，3 个交换器与2 个upstream 分别建立Federation link 的情况下，会有6 条连接。
+
+**建立federated queue**，首先同样也是定义一个upstream。之后定义Policy 的时候略微有变化，比如使用rabbitmqctl 工具的情况（定义所有以“queue”开头的队列作为federated queue）：
+```bash
+rabbitmqctl set_policy --apply-to queues p2 "^queue" '{"federation-upstream":"f1"}'
+```
+
 
 ## Shovel
-
+Shovel 能够可靠、持续地从一个Broker 中的队列（作为源端，即source）拉取数据并转发至另一个Broker 中的交换器（作为目的端，即destination）。作为源端的队列和作为目的端的交换器可以同时位于同一个Broker 上，也可以位于不同的Broker 上。  
+Shovel 可以翻译为“铲子”，是一种比较形象的比喻，这个“铲子”可以将消息从一方“挖到”另一方。Shovel 的行为就像优秀的客户端应用程序能够负责连接源和目的地、负责消息的读写及负责连接失败问题的处理。
 

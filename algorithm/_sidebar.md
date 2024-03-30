@@ -1,1 +1,1 @@
-* [数据结构](./algorithm/dataStructure.md)
+* [数据结构](algorithm/dataStructure.md)

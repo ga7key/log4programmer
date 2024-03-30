@@ -1,1 +1,1 @@
-* [Git](./versionControl/git.md)
+* [Git](versionControl/git.md)

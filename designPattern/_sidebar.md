@@ -1,1 +1,1 @@
-* [设计模式](./designPattern/design_pattern.md)
+* [设计模式](designPattern/design_pattern.md)

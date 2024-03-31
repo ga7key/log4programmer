@@ -1508,3 +1508,18 @@ http://192.168.0.2:15672/api/parameters/shovel/%2f/hidden_shovel
 4. 情形4：紧随情形3，当检测到队列queue1 中的消息个数超过1 百万或者消息占用大小高于1GB 时就将shovel2 停掉。
 
 如此，队列queue1 就拥有了队列queue2 这个“保镖”为它保驾护航。这里是“一备一”的情形，如果需要要“一备多”，可以采用镜像队列或者引入Federation。
+
+
+## Federation/Shovel 与集群
+Federation/Shovel | 集群
+ :---- | :----
+各个Broker 节点之间逻辑分离 | 逻辑上是一个Broker 节点
+各个Broker 节点之间可以运行不同版本的Erlang 和RabbitMQ | 各个Broker 节点之间必须运行相同版本的Erlang 和RabbitMQ
+各个Broker 节点之间可以在广域网中相连，当然必须要授予适当的用户和权限 | 各个Broker 节点之间必须在可信赖的局域网中相连，通过Erlang 内部节点传递消息，但节点间需要有相同的Erlang cookie
+各个Broker 节点之间能以任何拓扑逻辑部署，连接可以是单向的或者是双向的 | 所有Broker 节点都双向连接所有其他节点
+从CAP 理论中选择可用性和分区耐受性，即AP | 从CAP 理论中选择一致性和可用性，CA
+一个Broker 中的交换器可以是Federation 生成的或者是本地的 | 集群中所有Broker 节点中的交换器都是一样的，要么全有要么全无
+客户端所能看到它所连接的Broker 节点上的队列 | 客户端连接到集群中的任何Broker 节点都可以看到所有的队列
+
+### Federation与Shovel的异同
+通过Shovel 来连接各个RabbitMQ Broker，概念上与Federation 的情形类似，不过Shovel 工作在更低一层。鉴于Federation 从一个交换器中转发消息到另一个交换器（如果必要可以确认消息是否被转发），Shovel 只是简单地从某个Broker 上的队列中消费消息，然后转发消息到另一个Broker 上的交换器而已。Shovel 也可以在单独的一台服务器上去转发消息，比如将一个队列中的数据移动到另一个队列中。如果想获得比Federation 更多的控制，可以在广域网中使用Shovel 连接各个RabbitMQ Broker 来生产或消费消息。

@@ -1166,12 +1166,115 @@ rabbitmqctl set_policy Lazy "^myqueue$" '{"queue-mode":"lazy"}' --apply-to queue
 
 如果要将普通队列转变为惰性队列，那么我们需要忍受同样的性能损耗，首先需要将缓存中的消息换页至磁盘中，然后才能接收新的消息。反之，当将一个惰性队列转变为普通队列的时候，和恢复一个队列执行同样的操作，会将磁盘中的消息批量地导入到内存中。
 
-
 ### 内存、磁盘告警
+当内存使用超过配置的阈值或者磁盘剩余空间低于配置的阈值时，RabbitMQ 都会暂时阻塞（block）客户端的连接（Connection）并停止接收从客户端发来的消息，以此避免服务崩溃。与此同时，客户端与服务端的心跳检测也会失效。可以通过rabbitmqctl list_connections 命令或者Web 管理界面来查看它的状态，如下图：  
+![connection_status](../images/rabbitmq/2024-03-31_connection_status.png)  
+被阻塞的Connection 的状态要么是blocking，要么是blocked。  
+blocking对应于并不试图发送消息的Connection，比如消费者关联的Connection，这种状态下的Connection 可以继续运行。  
+blocked对应于一直有消息发送的Connection，这种状态下的Connection 会被停止发送消息。  
+注意在一个集群中，如果一个Broker 节点的内存或者磁盘受限，都会引起整个集群中所有的Connection 被阻塞。
 
+理想的情况是当发生阻塞时可以在阻止生产者的同时而又不影响消费者的运行。但是在AMQP 协议中，一个信道（Channel）上可以同时承载生产者和消费者，同一个Connection 中也可以同时承载若干个生产者的信道和消费者的信道，这样就会使阻塞逻辑错乱，虽然大多数情况下并不会发生任何问题，但还是建议生产和消费的逻辑可以分摊到独立的Connection 之上而不发生任何交集。客户端程序可以通过添加BlockedListener 来监听相应连接的阻塞信息。
 
+#### 内存告警
+RabbitMQ 服务器会在启动或者执行rabbitmqctl set_vm_memory_high_watermark fraction 命令时计算系统内存的大小。默认情况下vm_memory_high_watermark 的值为0.4，即内存阈值为0.4，表示当RabbitMQ 使用的内存超过40%时，就会产生内存告警并阻塞所有生产者的连接。一旦告警被解除（有消息被消费或者从内存转储到磁盘等情况的发生），一切都会恢复正常。  
+默认情况下将RabbitMQ 所使用内存的阈值设置为40%，这并不意味着此时RabbitMQ 不能使用超过40%的内存，这仅仅只是限制了RabbitMQ 的消息生产者。在最坏的情况下，Erlang 的垃圾回收机制会导致两倍的内存消耗，也就是80%的使用占比。
 
+内存阈值可以通过rabbitmq.config 配置文件来配置，下面示例中设置了默认的内存阈值为0.4：
+```tex
+[
+    {
+        rabbit, [
+            {vm_memory_high_watermark, 0.4}
+        ]
+    }
+].
+```
 
+与此配置对应的rabbitmqctl 系列的命令如下，fraction 对应上面配置中的0.4，表示占用内存的百分比，取值为大于等于0 的浮点数。
+```bash
+rabbitmqctl set_vm_memory_high_watermark {fraction}
+```
+
+设置对应的百分比值之后，RabbitMQ 中会打印服务日志。当在内存为7872MB 的节点中设置内存阈值为0.4 时，会有如下信息：
+```bash
+=INFO REPORT==== 4-Sep-2017::20:30:09 ===
+Memory limit set to 3148MB of 7872MB total.
+```
+
+如果设置fraction 为0，所有的生产者都会被停止发送消息。这个功能可以适用于需要禁止集群中所有消息发布的情况。  
+正常情况下建议vm_memory_high_watermark 取值在0.4 到0.66 之间，不建议取值超过0.7。
+
+除了通过百分比的形式，RabbitMQ 也可以采用绝对值的形式来设置内存阈值，默认单位为B。下面示例设置了内存阈值的绝对值为1024MB（1024×1024×1024B=1073741824B）：
+```bash
+[{rabbit, [{vm_memory_high_watermark, {absolute, 1073741824}}]}].
+# 纯数字的配置可读性较差，RabbitMQ 中也提供了单位的形式
+[{rabbit, [{vm_memory_high_watermark, {absolute, "1024MiB"}}]}].
+```
+
+可用的内存单位有：K 或KiB 表示千字节，大小为2¹⁰B；M 或MiB 表示兆字节，大小为2²⁰B；G 或GiB 表示千兆字节，大小为2³⁰B。  
+注意这里的内存单位还可以设置为：KB，大小为10³B；MB，大小为10⁶B；GB，大小为10⁹B。
+
+与绝对值配置对应的rabbitmqctl 系列的命令为：
+```bash
+rabbitmqctl set_vm_memory_high_watermark absolute {memory_limit}
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：用rabbitmqctl 命令设置的配置项，在服务器重启之后所设置的阈值都会失效；而通过配置文件的方式设置的阈值则不会在重启之后失效，但是修改配置文件后的配置需要在重启之后才能生效。
+
+在某个Broker 节点触及内存并阻塞生产者之前，它会尝试将队列中的消息换页到磁盘以释放内存空间。持久化和非持久化的消息都会被转储到磁盘中，其中持久化的消息本身就在磁盘中有一份副本，这里会将持久化的消息从内存中清除掉。
+
+默认情况下，在内存到达内存阈值的50%时会进行换页动作。也就是说，在默认的内存阈值为0.4 的情况下，当内存超过0.4×0.5=0.2 时会进行换页动作。可以通过在配置文件中配置vm_memory_high_watermark_paging_ratio 项来修改此值。可以将vm_memory_high_watermark_paging_ratio 值设置为大于1 的浮点数，这种配置相当于禁用了换页功能。
+```bash
+[{rabbit, [
+        {vm_memory_high_watermark_paging_ratio, 0.5},
+        {vm_memory_high_watermark, 0.4}
+]}].
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：注意RabbitMQ 中并没有类似rabbitmqctl vm_memory_high_watermark_paging_ratio {xxx}的命令。
+
+如果RabbitMQ 无法识别所在的操作系统，那么在启动的时候会在日志文件中追加一些信息，并将内存的值假定为1GB。相应的日志信息参考如下。对应vm_memory_high_watermark 为0.4 的情形来说，RabbitMQ 的内存阈值就约为410MB。如果操作系统本身的内存大小为8GB，可以将vm_memory_high_watermark 设置为3，这样内存阈值就提高到了3GB。
+```bash
+=WARNING REPORT==== 5-Sep-2017::17:23:44 ===
+Unknown total memory size for your OS {unix,magic_homebrew_os}. Assuming memory size is 1024MB.
+```
+
+#### 磁盘告警
+当剩余磁盘空间低于确定的阈值时，RabbitMQ 同样会阻塞生产者，这样可以避免因非持久化的消息持续换页而耗尽磁盘空间导致服务崩溃。  
+默认情况下，磁盘阈值为50MB，这意味着当磁盘剩余空间低于50MB 时会阻塞生产者并停止内存中消息的换页动作。这个阈值的设置可以减小但不能完全消除因磁盘耗尽而导致崩溃的可能性，比如在两次磁盘空间检测期间内，磁盘空间从大于50MB 被耗尽到0MB。  
+一个相对谨慎的做法是将磁盘阈值设置为与操作系统所显示的内存大小一致。
+
+在Broker 节点启动的时候会默认开启磁盘检测的进程，相对应的服务日志为：
+```bash
+=INFO REPORT==== 7-Sep-2017::20:03:00 ===
+Disk free limit set to 50MB
+```
+
+对于不识别的操作系统而言，磁盘检测功能会失效，对应的服务日志为：
+```bash
+=WARNING REPORT==== 7-Sep-2017::15:45:29 ===
+Disabling disk free space monitoring
+```
+
+RabbitMQ 会定期检测磁盘剩余空间，检测的频率与上一次执行检测到的磁盘剩余空间大小有关。正常情况下，每10 秒执行一次检测，随着磁盘剩余空间与磁盘阈值的接近，检测频率会有所增加。当要到达磁盘阈值时，检测频率为每秒10 次，这样有可能会增加系统的负载。
+
+可以通过在配置文件中配置disk_free_limit 项来设置磁盘阈值。
+```bash
+# 将磁盘阈值设置为1GB 左右
+[{rabbit, [{disk_free_limit, 1000000000}]}].
+# 也可以使用单位设置，单位的选择可以为KB，KiB，MB，MiB，GB，GiB
+[{rabbit, [{disk_free_limit, "1GB"}]}].
+```
+
+还可以参考机器内存的大小为磁盘阈值设置一个相对的比值。
+```bash
+# 将磁盘阈值设置为与集群内存一样大
+[{rabbit, [{disk_free_limit, {mem_relative, 1.0}}]}].
+```
+
+与绝对值和相对值这两种配置对应的rabbitmqctl 系列的命令为：rabbitmqctl set_disk_free_limit {disk_limit}和rabbitmqctl set_disk_free_limit mem_relative {fraction}，在Broker 重启之后将会失效。通过配置文件的方式设置的阈值则不会在重启之后失效，但是修改后的配置需要在重启之后才能生效。  
+正常情况下，建议disk_free_limit.mem_relative 的取值为1.0 到2.0 之间。
 
 ### 流控
 

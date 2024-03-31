@@ -1339,8 +1339,172 @@ Shovel 的主要优势在于：
 以上Shovel 结构中的broker1、broker2 中的exchange1、queue1、exchange2 及queue2 都可以在Shovel 成功连接源端或者目的端Broker 之后再第一次创建（执行一系列相应的AMQP 配置声明时），它们并不一定需要在Shovel link 建立之前创建。Shovel 可以为源端或者目的端配置多个Broker 的地址，这样可以使得源端或者目的端的Broker 失效后能够尝试重连到其他Broker 之上（随机挑选）。可以设置reconnect_delay 参数以避免由于重连行为导致的网络泛洪，或者可以在重连失败后直接停止连接。针对源端和目的端的所有配置声明会在重连成功之后被重新发送。
 
 ### Shovel 的使用
+Shovel 插件默认也在RabbitMQ 的发布包中，执行rabbitmq-plugins enable rabbitmq_shovel 命令可以开启Shovel 功能，Shovel 内部是基于AMQP 协议转发数据的，所以在开启rabbitmq_shovel 插件的时候，默认会开启amqp_client 插件。示例如下：
+```bash
+[root@node2 opt]# rabbitmq-plugins enable rabbitmq_shovel
+The following plugins have been enabled:
+  amqp_client
+  rabbitmq_shovel
+Applying plugin configuration to rabbit@node2... started 2 plugins.
+```
 
+如果要开启Shovel 的管理插件，需要执行rabbitmq-plugins enable rabbitmq_shovel_management 命令，示例如下：
+```bash
+[root@node2 opt]# rabbitmq-plugins enable rabbitmq_shovel_management
+The following plugins have been enabled:
+  cowlib
+  cowboy
+  rabbitmq_web_dispatch
+  rabbitmq_management_agent
+  rabbitmq_management
+  rabbitmq_shovel_management
+Applying plugin configuration to rabbit@node2... started 6 plugins.
+```
 
+之后，在RabbitMQ 的管理界面中“Admin”的右侧会多出“Shovel Status”和“Shovel Management”两个Tab 页。
 
+Shovel 既可以部署在源端，也可以部署在目的端。有两种方式可以部署Shovel：
+- 静态方式（static）是指在rabbitmq.config 配置文件中设置。
+- 动态方式（dynamic）是指通过Runtime Parameter 设置。
+
+##### 静态方式
+在rabbitmq.config 配置文件中针对Shovel 插件的配置信息是一种Erlang 项式，由单条Shovel 条目构成（shovels 部分的下一层）：
+```tex
+{rabbitmq_shovel, [ {shovels, [ {shovel_name, [ {sources, [ ... ]}, 
+                                                {destinations, [ ... ]}, 
+                                                {queue, queue_name}, 
+                                                {prefetch_count, count}, 
+                                                {ack_mode, a_mode}, 
+                                                {publish_properties, [ ... ]}, 
+                                                {publish_fields, [ ... ]}, 
+                                                {reconnect_delay, reconn_delay}
+]}, ... ]} ]}
+```
+
+每一条Shovel 条目定义了源端与目的端的转发关系，其名称（shovel_name）必须是独一无二的。其中sources、destination 和queue 这三项是必需的，其余的都可以默认。
+
+Shovel 的配置：
+```tex
+[{rabbitmq_shovel,
+    [{shovels,
+        [{hidden_shovel,
+            [{sources,
+                [{broker, "amqp://root:root123@192.168.0.2:5672"},
+                {declarations,
+                [
+                    {'queue.declare',[{queue, <<"queue1">>}, durable]},
+                    {'exchange.declare',[
+                            {exchange, <<"exchange1">>},
+                            {type, <<"direct">>},
+                            durable
+                        ]
+                    },
+                    {'queue.bind',[
+                            {exchange, <<"exchange1">>},
+                            {queue, <<"queue1">>},
+                            {routing_key, <<"rk1">>}
+                        ]
+                    }]}]},
+            {destinations,
+                [{broker, "amqp://root:root123@192.168.0.3:5672"},
+                {declarations,
+                [
+                    {'queue.declare',[{queue, <<"queue2">>}, durable]},
+                    {'exchange.declare',[
+                            {exchange, <<"exchange2">>},
+                            {type, <<"direct">>},
+                            durable
+                        ]
+                    },
+                    {'queue.bind',[
+                            {exchange, <<"exchange2">>},
+                            {queue, <<"queue2">>},
+                            {routing_key, <<"rk2">>}
+                        ]
+                    }]}]},
+            {queue, <<"queue1">>},
+            {ack_mode, no_ack},
+            {prefetch_count, 64},
+            {publish_properties, [{delivery_mode, 2}]},
+            {add_forward_headers, true},
+            {publish_fields, [{exchange, <<"exchange2">>}, {routing_key,<<"rk2">>}]},
+            {reconnect_delay, 5}]
+        }]
+    }]
+}].
+```
+
+- sources 和destinations 两者都包含了同样类型的配置：
+```tex
+{sources, [ {broker[或brokers], broker_list},
+            {declarations, declaration_list}
+        ]}
+```
+▶ broker 项配置的是URI，定义了用于连接Shovel 两端的服务器地址、用户名、密码、vhost 和端口号等。如果sources 或者destinations 是RabbitMQ 集群，那么就使用brokers，并在其后用多个URI 字符串以“[]”的形式包裹起来，比如{brokers,["amqp://root:root123@192.168.0.2:5672","amqp://root:root123@192.168.0.4:5672"]}，这样的定义能够使得Shovel 在主节点故障时转移到另一个集群节点上。  
+▶ declarations 这一项是可选的。  
+▶ declaration_list 指定了可以使用的AMQP 命令的列表，声明了队列、交换器和绑定关系。比如Shovel 的配置中sources 的declarations 这一项声明了队列queue1（'queue.declare'）、交换器exchange1（'exchange.declare'）及其之间的绑定关系（'queue.bind'）。注意其中所有的字符串并不是简单地用引号标注，而是同时用双尖括号包裹，比如<<"queue1">>。这里的双尖括号是要让Erlang 程序不要将其视为简单的字符串，而是binary 类型的字符串。如果没有双尖括号包裹，那么Shovel 在启动的时候就会出错。与queue1 一起的还有一个durable 参数，它不需要像其他参数一样需要包裹在大括号内，这是因为像durable 这种类型的参数不需要赋值，它要么存在，要么不存在，只有在参数需要赋值的时候才需要加上大括号。  
+▶ queue 表示源端服务器上的队列名称。可以将queue 设置为“<<>>”，表示匿名队列（队列名称由RabbitMQ 自动生成）。  
+▶ prefetch_count 参数表示Shovel 内部缓存的消息条数，Shovel 的内部缓存是源端服务器和目的端服务器之间的中间缓存部分。  
+▶ ack_mode 表示在完成转发消息时的确认模式，和Federation 的ack_mode 一样也有三种取值：no_ack 表示无须任何消息确认行为；on_publish 表示Shovel 会把每一条消息发送到目的端之后再向源端发送消息确认；on_confirm 表示Shovel 会使用publisher confirm 机制，在收到目的端的消息确认之后再向源端发送消息确认。Shovel 的ack_mode 默认也是on_confirm，并且官方强烈建议使用该值。如果选择使用其他值，整体性能虽然会有略微提升，但是发生各种失效问题的情况时，消息的可靠性得不到保障。  
+▶ publish_properties 是指消息发往目的端时需要特别设置的属性列表。默认情况下，被转发的消息的各个属性是被保留的，但是如果在publish_properties 中对属性进行了设置则可以覆盖原先的属性值。publish_properties 的属性列表包括content_type、content_encoding 、headers 、delivery_mode 、priority 、correlation_id 、reply_to、expiration、message_id、timestamp、type、user_id、app_id 和cluster_id。  
+▶ add_forward_headers 如果设置为true，则会在转发的消息内添加x-shovelled 的header 属性。  
+▶ publish_fields 定义了消息需要发往目的端服务器上的交换器以及标记在消息上的路由键。如果交换器和路由键没有定义，则Shovel 会从原始消息上复制这些被忽略的设置。  
+▶ reconnect_delay 指定在Shovel link 失效的情况下，重新建立连接前需要等待的时间，单位为秒。如果设置为0，则不会进行重连动作，即Shovel 会在首次连接失效时停止工作。reconnect_delay 默认为5 秒。
+
+##### 动态方式
+Shovel 动态部署方式的配置信息会被保存到RabbitMQ 的Mnesia 数据库中，包括权限信息、用户信息和队列信息等内容。每一个Shovel link 都由一个相应的Parameter 定义，这个Parameter 同样可以通过rabbitmqctl 工具、RabbitMQ Management 插件的HTTP API 接口或者rabbitmq_shovel_management 提供的Web 管理界面的方式设置。
+
+下面展示三种设置Parameter 的示例用法。
+
+**第一种**是通过rabbitmqctl 工具的方式，详细如下：
+```bash
+rabbitmqctl set_parameter shovel hidden_shovel \
+'{"src-uri":"amqp://root:root123@192.168.0.2:5672","src-queue":"queue1",
+"dest-uri":"amqp://root:root123@192.168.0.3:5672","src-exchange-key":"rk2",
+"prefetch-count":64, "reconnect-delay":5, "publish-properties":[],
+"add-forward-headers":true, "ack-mode":"on-confirm"}'
+```
+
+**第二种**是通过调用HTTP API 接口的方式，详细如下：
+```bash
+curl -i -u root:root123 -XPUT -d 
+'{"value":{"src-uri":"amqp://root:root123@192.168.0.2:5672","src-queue":"queue1",
+"dest-uri":"amqp://root:root123@192.168.0.3:5672","src-exchange-key":"rk2",
+"prefetch-count":64, "reconnect-delay":5, "publish-properties":[],
+"add-forward-headers":true, "ack-mode":"on-confirm"}}' 
+http://192.168.0.2:15672/api/parameters/shovel/%2f/hidden_shovel
+```
+
+**第三种**是通过Web 管理界面中添加的方式，在“Admin”→“Shovel Management”→“Add a new shovel”中创建。  
+在创建了一个Shovel link 之后，可以在Web 管理界面中“Admin”→“Shovel Status”中查看到相应的信息，也可以通过rabbitmqctl eval 'rabbit_shovel_status:status().'命令直接查询Shovel的状态信息，该命令会调用rabbitmq_shovel插件模块中的status方法，该方法将返回一个Erlang 列表，其中每一个元素对应一个已配置好的Shovel。示例如下：
+```bash
+[root@node1 ~]# rabbitmqctl eval 'rabbit_shovel_status:status().'
+[{{<<"/">>,<<"hidden_shovel">>},
+  dynamic,
+  {running,[{src_uri,<<"amqp://192.168.0.2:5672">>},
+          {dest_uri,<<"amqp://192.168.0.3:5672">>}]},
+  {{2017,10,16},{11,41,58}}}]
+```
+
+列表中的每一个元素都以一个四元组的形式构成：{Name, Type, Status, Timestamp}。具体含义如下：
+- Name 表示Shovel 的名称。
+- Type 表示类型，有2 种取值——static 和dynamic。
+- Status 表示目前Shovel 的状态。当Shovel 处于启动、连接和创建资源时状态为starting；当Shovel 正常运行时是running；当Shovel 终止时是terminated。
+- Timestamp 表示该Shovel 进入当前状态的时间戳，具体格式是{{YYYY, MM, DD}，{HH, MM, SS}}。
 
 ### 案例：消息堆积的治理
+消息堆积是一把双刃剑，适量的堆积可以有削峰、缓存之用，但是如果堆积过于严重，那么就可能影响到其他队列的使用，导致整体服务质量的下降。  
+对于一台普通的服务器来说，在一个队列中堆积1 万至10 万条消息，丝毫不会影响什么。但是如果这个队列中堆积超过1 千万乃至一亿条消息时，可能会引起一些严重的问题，比如引起内存或者磁盘告警而造成所有Connection 阻塞。
+
+消息堆积的治理方案：
+- 消息堆积严重时，可以选择清空队列，或者采用空消费程序丢弃掉部分消息。不过对于重要的数据而言，丢弃消息的方案并无用武之地。  
+- 另一种方案是增加下游消费者的消费能力，这个思路可以通过后期优化代码逻辑或者增加消费者的实例数来实现。但是后期的代码优化在面临紧急情况时总归是“远水解不了近渴”，并且有些业务场景也并非可以简单地通过增加消费实例而得以增强消费能力。
+- 当某个队列中的消息堆积严重时，比如超过某个设定的阈值，就可以通过Shovel 将队列中的消息移交给另一个集群。
+
+运用Shovel 转移消息的流程：
+1. 情形1：当检测到当前运行集群cluster1 中的队列queue1 中有严重消息堆积，比如通过/api/queues/vhost/name 接口获取到队列的消息个数（messages）超过2 千万或者消息占用大小（messages_bytes）超过10GB 时，就启用shovel1 将队列queue1 中的消息转发至备份集群cluster2 中的队列queue2。
+2. 情形2：紧随情形1，当检测到队列queue1 中的消息个数低于1 百万或者消息占用大小低于1GB 时就停止shovel1，然后让原本队列queue1 中的消费者慢慢处理剩余的堆积。
+3. 情形3：当检测到队列queue1 中的消息个数低于10 万或者消息占用大小低于100MB时，就开启shovel2 将队列queue2 中暂存的消息返还给队列queue1。
+4. 情形4：紧随情形3，当检测到队列queue1 中的消息个数超过1 百万或者消息占用大小高于1GB 时就将shovel2 停掉。
+
+如此，队列queue1 就拥有了队列queue2 这个“保镖”为它保驾护航。这里是“一备一”的情形，如果需要要“一备多”，可以采用镜像队列或者引入Federation。

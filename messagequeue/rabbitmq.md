@@ -1596,6 +1596,74 @@ rmqEncapsulation.basicConsume(channel, "queue", false, "consumer_zzh", rmqEncaps
 <span style="color: red;font-weight: bold;">Tips</span>：_以上代码示例省去了很多的功能，局限性很强。比如没有使用publisher confirm 机制；没有设置mandatory 参数；只能使用一个Connection；无法保证消息的顺序性；消息没有使用Protostuff 这种性能较高的序列化工具进行序列化和反序列化，等等。_
 
 ### 镜像队列
+如果RabbitMQ 集群中只有一个Broker 节点，那么该节点的失效将导致整体服务的临时性不可用，并且也可能会导致消息的丢失。  
+可以将所有消息都设置为持久化，并且对应队列的durable 属性也设置为true，但是这样仍然无法避免由于缓存导致的问题：因为消息在发送之后和被写入磁盘并执行刷盘动作之间存在一个短暂却会产生问题的时间窗。通过publisher confirm 机制能够确保客户端知道哪些消息已经存入磁盘，尽管如此，一般不希望遇到因单点故障导致的服务不可用。  
+如果RabbitMQ 集群是由多个Broker 节点组成的，那么从服务的整体可用性上来讲，该集群对于单点故障是有弹性的。  
+但是也需要注意：尽管交换器和绑定关系能够在单点故障问题上幸免于难，但是队列和其上的存储的消息却不行，这是因为队列进程及其内容仅仅维持在单个节点之上，所以一个节点的失效表现为其对应的队列不可用。
 
+引入镜像队列（Mirror Queue）的机制，可以将队列镜像到集群中的其他Broker 节点之上，如果集群中的一个节点失效了，队列能自动地切换到镜像中的另一个节点上以保证服务的可用性。在通常的用法中，针对每一个配置镜像的队列（以下简称镜像队列）都包含一个主节点（master）和若干个从节点（slave），相应的结构如下图：  
+![queue_master_slave](../images/rabbitmq/2024-04-01_queue_master_slave.png) _主从结构_  
+slave 会准确地按照master 执行命令的顺序进行动作，故slave 与master 上维护的状态应该是相同的。如果master 由于某种原因失效，那么“资历最老”的slave 会被提升为新的master。根据slave 加入的时间排序，时间最长的slave 即为“资历最老”。  
+发送到镜像队列的所有消息会被同时发往master 和所有的slave 上，如果此时master 挂掉了，消息还会在slave 上，这样slave 提升为master 的时候消息也不会丢失。  
+除发送消息（Basic.Publish）外的所有动作都只会向master 发送，然后再由master 将命令执行的结果广播给各个slave。
 
+如果消费者与slave 建立连接并进行订阅消费，其实质上都是从master 上获取消息，只不过看似是从slave 上消费而已。比如消费者与slave 建立了TCP 连接之后执行一个Basic.Get 的操作，那么首先是由slave 将Basic.Get 请求发往master，再由master 准备好数据返回给slave，最后由slave 投递给消费者。  
+这样大多的读写压力都落到了master 上，是否做不到有效的负载均衡？注意这里的master 和slave 是针对队列而言的，而队列可以均匀地散落在集群的各个Broker 节点中以达到负载均衡的目的，因为真正的负载还是针对实际的物理机器而言的，而不是内存中驻留的队列进程。
 
+如下图所示，集群中的每个Broker 节点都包含1 个队列的master 和2 个队列的slave，Q1 的负载大多都集中在broker1 上，Q2 的负载大多都集中在broker2 上，Q3 的负载大多都集中在broker3 上，只要确保队列的master 节点均匀散落在集群中的各个Broker 节点即可确保很大程度上的负载均衡（每个队列的流量会有不同，因此均匀散落各个队列的master 也无法确保绝对的负载均衡）。至于为什么不像MySQL 一样读写分离，RabbitMQ 从编程逻辑上来说完全可以实现，但是这样得不到更好的收益，即读写分离并不能进一步优化负载，却会增加编码实现的复杂度，增加出错的可能，显得得不偿失。  
+![cluster_mirror_queue](../images/rabbitmq/2024-04-01_cluster_mirror_queue.png)
+
+<span style="color: red;font-weight: bold;">Tips</span>：RabbitMQ 的镜像队列同时支持publisher confirm 和事务两种机制。在事务机制中，只有当前事务在全部镜像中执行之后，客户端才会收到Tx.Commit-Ok 的消息。同样的，在publisher confirm 机制中，生产者进行当前消息确认的前提是该消息被全部进行所接收了。
+
+###### 镜像队列的底层结构
+镜像队列的backing_queue 比较特殊，其实现并非是rabbit_variable_queue，它内部包裹了普通backing_queue 进行本地消息消息持久化处理，在此基础上增加了将消息和ack 复制到所有镜像的功能。镜像队列的结构如下图所示，master 的backing_queue 采用的是rabbit_mirror_queue_master，而slave 的backing_queue 实现是rabbit_mirror_queue_slave。  
+![mirror_queue_structure](../images/rabbitmq/2024-04-01_mirror_queue_structure.png) _镜像队列的结构_  
+所有对rabbit_mirror_queue_master 的操作都会通过组播GM（Guaranteed Multicast）的方式同步到各个slave 中。GM 负责消息的广播，rabbit_mirror_queue_slave 负责回调处理，而master 上的回调处理是由coordinator 负责完成的。如前所述，除了Basic.Publish，所有的操作都是通过master 来完成的，master 对消息进行处理的同时将消息的处理通过GM 广播给所有的slave ， slave 的GM 收到消息后， 通过回调交由rabbit_mirror_queue_slave 进行实际的处理。
+
+GM 模块实现的是一种可靠的组播通信协议，该协议能够保证组播消息的原子性，即保证组中活着的节点要么都收到消息要么都收不到，它的实现大致为：将所有的节点形成一个循环链表，每个节点都会监控位于自己左右两边的节点，当有节点新增时，相邻的节点保证当前广播的消息会复制到新的节点上；当有节点失效时，相邻的节点会接管以保证本次广播的消息会复制到所有的节点。在master 和slave 上的这些GM 形成一个组（gm_group），这个组的信息会记录在Mnesia 中。不同的镜像队列形成不同的组。操作命令从master 对应的GM 发出后，顺着链表传送到所有的节点。由于所有节点组成了一个循环链表，master 对应的GM 最终会收到自己发送的操作命令，这个时候master 就知道该操作命令都同步到了所有的slave 上。  
+新节点的加入过程如下图所示，整个过程就像在链表中间插入一个节点。注意每当一个节点加入或者重新加入到这个镜像链路中时，之前队列保存的内容会被全部清空。  
+![mirror_new_node](../images/rabbitmq/2024-04-01_mirror_new_node.png) _新节点的加入过程_
+
+当slave 挂掉之后，除了与slave 相连的客户端连接全部断开，没有其他影响。  
+当master 挂掉之后，会有以下连锁反应：
+1. 与master 连接的客户端连接全部断开。
+2. 选举最老的slave 作为新的master，因为最老的slave 与旧的master 之间的同步状态应该是最好的。如果此时所有slave 处于未同步状态，则未同步的消息会丢失。
+3. 新的master 重新入队所有unack 的消息，因为新的slave 无法区分这些unack 的消息是否已经到达客户端，或者是ack 信息丢失在老的master 链路上，再或者是丢失在老的master 组播ack 消息到所有slave 的链路上，所以出于消息可靠性的考虑，重新入队所有unack 的消息，不过此时客户端可能会有重复消息。
+4. 如果客户端连接着slave，并且Basic.Consume 消费时指定了x-cancel-on-ha-failover 参数，那么断开之时客户端会收到一个Consumer Cancellation Notification 的通知，消费者客户端中会回调Consumer 接口的handleCancel 方法。如果未指定x-cancelon-ha-failover 参数，那么消费者将无法感知master 宕机。
+
+x-cancel-on-ha-failover 参数的使用示例如下：
+```java
+Channel channel = ...;
+Consumer consumer = ...;
+Map<String, Object> args = new HashMap<String, Object>();
+args.put("x-cancel-on-ha-failover", true);
+channel.basicConsume("my-queue", false, args, consumer);
+```
+###### 镜像队列的配置
+通过添加相应的Policy 来完成的，此处需要详解介绍的是rabbitmqctl set_policy [-p vhost] [--priority priority] [--apply-to apply-to] {name} {pattern} {definition}命令中的definition 部分，对于镜像队列的配置来说，definition 中需要包含三个部分：
+- ha-mode：指明镜像队列的模式，有效值为all、exactly、nodes，默认为all。all 表示在集群中所有的节点上进行镜像；exactly 表示在指定个数的节点上进行镜像，节点个数由ha-params 指定；nodes 表示在指定节点上进行镜像，节点名称通过ha-params 指定，节点的名称通常类似于rabbit@hostname ， 可以通过rabbitmqctl cluster_status 命令查看到。
+- ha-params：不同的ha-mode 配置中需要用到的参数。
+- ha-sync-mode：队列中消息的同步方式，有效值为automatic 和manual。
+
+举个例子，对队列名称以“queue_”开头的所有队列进行镜像，并在集群的两个节点上完成镜像，Policy 的设置命令为：
+```bash
+rabbitmqctl set_policy --priority 0 --apply-to queues mirror_queue "^queue_"
+ '{"ha-mode":"exactly","ha-params":2,"ha-sync-mode":"automatic"}'
+```
+
+ha-mode 参数对排他（exclusive）队列并不生效，因为排他队列是连接独占的，当连接断开时队列会自动删除，所以实际上这个参数对排他队列没有任何意义。
+
+---
+
+将新节点加入已存在的镜像队列时，默认情况下ha-sync-mode 取值为manual，镜像队列中的消息不会主动同步到新的slave 中，除非显式调用同步命令。当调用同步命令后，队列开始阻塞，无法对其进行其他操作，直到同步完成。当ha-sync-mode 设置为automatic 时，新加入的slave 会默认同步已知的镜像队列。由于同步过程的限制，所以不建议对生产环境中正在使用的队列进行操作。  
+使用rabbitmqctl list_queues {name} slave_pids synchronised_slave_pids 命令可以查看哪些slaves 已经完成同步。  
+通过手动方式同步一个队列的命令为rabbitmqctl sync_queue {name}。  
+也可以取消某个队列的同步操作：rabbitmqctl cancel_sync_queue {name}。
+
+---
+
+当所有slave 都出现未同步状态，并且ha-promote-on-shutdown 设置为when-synced（默认）时，如果master 因为主动原因停掉，比如通过rabbitmqctl stop 命令或者优雅关闭操作系统，那么slave 不会接管master，也就是此时镜像队列不可用；但是如果master 因为被动原因停掉，比如Erlang 虚拟机或者操作系统崩溃，那么slave 会接管master。这个配置项隐含的价值取向是保证消息可靠不丢失，同时放弃了可用性。如果ha-promote-on-shutdown 设置为always，那么不论master 因为何种原因停止，slave 都会接管master，优先保证可用性，不过消息可能会丢失。
+
+---
+
+镜像队列中最后一个停止的节点会是master，启动顺序必须是master 先启动。如果slave 先启动，它会有30 秒的等待时间，等待master 的启动，然后加入到集群中。如果30 秒内master 没有启动，slave 会自动停止。当所有节点因故（断电等）同时离线时，每个节点都认为自己不是最后一个停止的节点，要恢复镜像队列，可以尝试在30 秒内启动所有节点。

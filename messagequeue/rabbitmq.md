@@ -1277,9 +1277,323 @@ RabbitMQ 会定期检测磁盘剩余空间，检测的频率与上一次执行�
 正常情况下，建议disk_free_limit.mem_relative 的取值为1.0 到2.0 之间。
 
 ### 流控
+RabbitMQ 可以对内存和磁盘使用量设置阈值，当达到阈值后，生产者将被阻塞（block），直到对应项恢复正常。除了这两个阈值，从2.8.0 版本开始，RabbitMQ 还引入了流控（Flow Control）机制来确保稳定性。  
+流控机制是用来避免消息的发送速率过快而导致服务器难以支撑的情形。  
+内存和磁盘告警相当于全局的流控（Global Flow Control），一旦触发会阻塞集群中所有的Connection，而这里讲的流控是针对单个Connection 的，可以称之为Per-Connection Flow Control 或者Internal Flow Control。
 
+#### 流控的原理
+Erlang 进程之间并不共享内存（binary 类型的除外），而是通过消息传递来通信，每个进程都有自己的进程邮箱（mailbox）。默认情况下，Erlang 并没有对进程邮箱的大小进行限制，所以当有大量消息持续发往某个进程时，会导致该进程邮箱过大，最终内存溢出并崩溃。  
+在RabbitMQ 中，如果生产者持续高速发送，而消费者消费速度较低时，如果没有流控，很快就会使内部进程邮箱的大小达到内存阈值。
 
+RabbitMQ 使用了一种基于信用证算法（credit-based algorithm）的流控机制来限制发送消息的速率以解决前面所提出的问题。它通过监控各个进程的进程邮箱，当某个进程负载过高而来不及处理消息时，这个进程的进程邮箱就会开始堆积消息。当堆积到一定量时，就会阻塞而不接收上游的新消息。从而慢慢地，上游进程的进程邮箱也会开始堆积消息。当堆积到一定量时也会阻塞而停止接收上游的消息，最后就会使负责网络数据包接收的进程阻塞而暂停接收新的数据。
 
+**信用证算法**  
+如下图所示，进程A 接收消息并转发至进程B，进程B 接收消息并转发至进程C。每个进程中都有一对关于收发消息的credit值。  
+以进程B为例，{{credit_from, C}, value}表示能发送多少条消息给C，每发送一条消息该值减1，当为0 时，进程B 不再往进程C 发送消息也不再接收进程A 的消息。{{credit_to, A}, value}表示再接收多少条消息就向进程A 发送增加credit 值的通知，进程A 接收到该通知后就增加{{credit_from, B}, value}所对应的值，这样进程A 就能持续发送消息。当上游发送速率高于下游接收速率时，credit 值就会被逐渐耗光，这时进程就会被阻塞，阻塞的情况会一直传递到最上游。当上游进程收到来自下游进程的增加credit 值的通知时，若此时上游进程处于阻塞状态则解除阻塞，开始接收更上游进程的消息，一个一个传导最终能够解除最上游的阻塞状态。由此可知，基于信用证的流控机制最终将消息发送进程的发送速率限制在消息处理进程的处理能力范围之内。  
+![credit-based algorithm](../images/rabbitmq/2024-03-31_credit-based_algorithm.png) _信用证算法_
+
+如下图所示，一个连接（Connection）触发流控时会处于“flow”的状态，也就意味着这个Connection 的状态每秒在blocked 和unblocked 之间来回切换数次，这样可以将消息发送的速率控制在服务器能够支撑的范围之内。可以通过rabbitmqctl list_connections 命令或者Web 管理界面来查看Connection 的状态，处于flow 状态的Connection 和处于running 状态的Connection 并没有什么不同，这个状态只是告诉系统管理员相应的发送速率受限了。而对于客户端而言，它看到的只是服务器的带宽要比正常情况下要小一些。  
+![connection_status_flow_control](../images/rabbitmq/2024-03-31_connection_status_flow_control.png)
+
+流控机制不只是作用于Connection，同样作用于信道（Channel）和队列。从Connection 到Channel，再到队列，最后是消息持久化存储形成一个完整的流控链，对于处于整个流控链中的任意进程，只要该进程阻塞，上游的进程必定全部被阻塞。也就是说，如果某个进程达到性能瓶颈，必然会导致上游所有的进程被阻塞。所以可以利用流控机制的这个特点找出瓶颈之所在。  
+![flow_control_chains](../images/rabbitmq/2024-03-31_flow_control_chains.png) _流控链_  
+- rabbit_reader：Connection 的处理进程，负责接收、解析AMQP 协议数据包等。
+- rabbit_channel：Channel 的处理进程，负责处理AMQP 协议的各种方法、进行路由解析等。
+- rabbit_amqqueue_process：队列的处理进程，负责实现队列的所有逻辑。
+- rabbit_msg_store：负责实现消息的持久化。
+
+**流控状态解析**  
+- 当某个Connection 处于flow 状态，但这个Connection 中没有一个Channel 处于flow 状态时，这就意味这个Connection 中有一个或者多个Channel 出现了性能瓶颈。某些Channel 进程的运作（比如处理路由逻辑）会使得服务器CPU 的负载过高从而导致了此种情形。尤其是在发送大量较小的非持久化消息时，此种情形最易显现。  
+- 当某个Connection 处于flow 状态，并且这个Connection 中也有若干个Channel 处于flow 状态，但没有任何一个对应的队列处于flow 状态时，这就意味着有一个或者多个队列出现了性能瓶颈。这可能是由于将消息存入队列的过程中引起服务器CPU 负载过高，或者是将队列中的消息存入磁盘的过程中引起服务器I/O 负载过高而引起的此种情形。尤其是在发送大量较小的持久化消息时，此种情形最易显现。  
+- 当某个Connection 处于flow 状态，同时这个Connection 中也有若干个Channel 处于flow 状态，并且也有若干个对应的队列处于flow 状态时，这就意味着在消息持久化时出现了性能瓶颈。在将队列中的消息存入磁盘的过程中引起服务器I/O 负载过高而引起的此种情形。尤其是在发送大量较大的持久化消息时，此种情形最易显现。
+
+#### 案例：打破队列的瓶颈
+一般情况下，向一个队列里推送消息时，往往会在rabbit_amqqueue_process 中（即队列进程中）产生性能瓶颈。  
+在向一个队列中快速发送消息的时候，Connection 和Channel 都会处于flow 状态，而队列处于running 状态，这样通过流控状态解析可以得出在队列进程中产生性能瓶颈的结论。在一台CPU 主频为2.6Hz、CPU 内核为4、内存为8GB、磁盘为40GB 的虚拟机中测试向单个队列中发送非持久化、大小为10B 的消息，消息发送的QPS 平均为18k 左右。如果开启publisherconfirm 机制、持久化消息及增大payload 都会降低这个QPS 的数值。
+
+**提升队列的性能**一般可以有两种解决方案：
+1. 开启Erlang 语言的HiPE 功能，这样保守估计可以提高30%～40%的性能，不过在较旧版本的Erlang 中，这个功能不太稳定，建议使用较新版本的Erlang，版本至少是18.x。
+2. 寻求打破rabbit_amqqueue_process 的性能瓶颈。这里的打破是指以多个rabbit_amqqueue_process 替换单个rabbit_amqqueue_process（如下图所示），这样可以充分利用上rabbit_reader 或者rabbit_channel 进程中被流控的性能。  
+![many_rabbit_amqqueue_process](../images/rabbitmq/2024-03-31_many_rabbit_amqqueue_process.png) _利用多个rabbit_amqqueue_process 替换单个rabbit_amqqueue_process_
+
+<span style="color: red;font-weight: bold;">Tips</span>：如果在应用代码中直接使用多个队列，则会侵入原有代码的逻辑使其复杂化，同时可读性也差。这里所要做的一件事就是封装。将交换器、队列、绑定关系、生产和消费的方法全部进行封装，这样对于应用来说好比在操作一个（逻辑）队列。
+
+与Broker 建立连接、声明交换器跟原先的实现没有什么差别，但是声明队列和绑定关系就需要注意了，在这个逻辑队列背后是多个实际的物理队列。物理队列的个数需要事先规划好，对于物理队列的个数我们也可以称之为“分片数”。假设这里的分片数为4 个，那么实际声明队列和绑定关系就各自需要4 次。比如逻辑队列名称为“queue”，那么就需要转变为类似“queue_0”、“queue_1”、“queue_2”、“queue_3”这4 个物理队列，类似的路由键也需要从“rk”转变为“rk_0”、“rk_1”、“rk_2”、“rk_3”。如下图所示：  
+![_queue_packaging](../images/rabbitmq/2024-03-31_queue_packaging.png)
+
+封装声明的示例代码：
+```java
+/**
+* host、port、vhost、username、password 值可以在rmq_cfg.properties 配置
+*/
+public class RmqEncapsulation {
+    private static String host = "localhost";
+    private static int port = 5672;
+    private static String vhost = "/";
+    private static String username = "guest";
+    private static String password = "guest";
+    private static Connection connection;
+    //分片数，表示一个逻辑队列背后的实际队列数
+    private int subdivisionNum;
+    public RmqEncapsulation(int subdivisionNum) {
+        this.subdivisionNum = subdivisionNum;
+    }
+    //创建Connection
+    public static void newConnection() throws IOException, TimeoutException {
+        ConnectionFactory connectionFactory = new ConnectionFactory();
+        connectionFactory.setHost(host);
+        connectionFactory.setVirtualHost(vhost);
+        connectionFactory.setPort(port);
+        connectionFactory.setUsername(username);
+        connectionFactory.setPassword(password);
+        connection = connectionFactory.newConnection();
+    }
+    //获取Connection，若为null，则调用newConnection 进行创建
+    public static Connection getConnection() throws IOException, TimeoutException {
+        if (connection == null) {
+            newConnection();
+        }
+        return connection;
+    }
+    //关闭Connection
+    public static void closeConnection() throws IOException {
+        if (connection != null) {
+            connection.close();
+        }
+    }
+    //声明交换器
+    public void exchangeDeclare(Channel channel, String exchange, String type, boolean durable,
+        boolean autoDelete, Map<String, Object> arguments) throws IOException {
+        channel.exchangeDeclare(exchange, type, durable, autoDelete, autoDelete, arguments);
+    }
+    //声明队列
+    public void queueDeclare(Channel channel, String queue, boolean durable, boolean exclusive, 
+    boolean autoDelete, Map<String, Object> arguments) throws IOException {
+        for (int i = 0; i < subdivisionNum; i++) {
+            String queueName = queue + "_" + i;
+            channel.queueDeclare(queueName, durable, exclusive, autoDelete, arguments);
+        }
+    }
+    //创建绑定关系
+    public void queueBind(Channel channel, String queue, String exchange, String routingKey, 
+        Map<String, Object> arguments) throws IOException {
+        for (int i = 0; i < subdivisionNum; i++) {
+            String rkName = routingKey + "_" + i;
+            String queueName = queue + "_" + i;
+            channel.queueBind(queueName, exchange, rkName, arguments);
+        }
+    }
+}
+```
+
+注意queueDeclare 方法、queueBind 方法中名称转换的小细节。这里方法的取名也和原生客户端中的名称相同，这样可以尽量保持使用者原有的编程思维。这里的queueDeclare 方法是针对单个Broker 的情况设计的，如果集群中有多个节点，queueDeclare 方法需要做些修改，使得分片队列能够均匀地散开到集群中的各个节点中，以达到负载均衡的目的。
+
+使用RmqEncapsulation 类来声明交换器“exchange”、队列“queue”及之间的绑定关系：
+```java
+RmqEncapsulation rmqEncapsulation = new RmqEncapsulation(4);
+try {
+    Connection connection = RmqEncapsulation.getConnection();
+    Channel channel = connection.createChannel();
+    rmqEncapsulation.exchangeDeclare(channel, "exchange", "direct", true, false, null);
+    rmqEncapsulation.queueDeclare(channel, "queue", true, false, false, null);
+    rmqEncapsulation.queueBind(channel, "queue", "exchange", "rk", null);
+} catch (IOException e) {
+    e.printStackTrace();
+} catch (TimeoutException e) {
+    e.printStackTrace();
+} finally {
+    try {
+        RmqEncapsulation.closeConnection();
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+}
+```
+
+生产者的封装代码：
+```java
+public void basicPublish(Channel channel, String exchange, String routingKey, boolean mandatory, 
+    AMQP.BasicProperties props, byte[] body) throws IOException {
+    //随机挑选一个队列发送
+    Random random = new Random();
+    int index = random.nextInt(subdivisionNum);
+    String rkName = routingKey + "_" + index;
+    channel.basicPublish(exchange, rkName, mandatory, props, body);
+}
+```
+
+basicPublish 方法的使用示例如下：
+```java
+Channel channel = connection.createChannel();
+for(int i=0;i<100;i++) {
+    //Message 类的是用来封装消息的
+    Message message = new Message();
+    message.setMsgSeq(i);
+    message.setMsgBody("rabbitmq encapsulation");
+    byte[] body = getBytesFromObject(message);
+    rmqEncapsulation.basicPublish(channel, "exchange", "rk", false, MessageProperties.PERSISTENT_TEXT_PLAIN, body);
+}
+```
+
+Message 类的实现如下。为了方便演示，通过Serializable 接口来实现序列化，实际使用时建议采用ProtoBuff 这类性能较高的序列化工具。
+```java
+public class Message implements Serializable{
+    private static final long serialVersionUID = 1L;
+    //消息的序号
+    private long msgSeq;
+    //消息体本身
+    private String msgBody;
+    //用于消息确认
+    private long deliveryTag;
+    //省略Getter 和Setter 方法
+    @Override
+    public String toString(){
+        return "[msgSeq=" + msgSeq + ", msgBody=" + msgBody
+        + ", deliveryTag=" + deliveryTag + "]";
+    }
+}
+```
+
+getBytesFromObject 方法与getObjectFromBytes 方法：
+```java
+public static byte[] getBytesFromObject(Object object) throws IOException {
+    if (object == null) {
+        return null;
+    }
+    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+    ObjectOutputStream oo = new ObjectOutputStream(bo);
+    oo.writeObject(object);
+    oo.close();
+    bo.close();
+    return bo.toByteArray();
+}
+public static Object getObjectFromBytes(byte[] body) throws IOException, ClassNotFoundException {
+    if (body == null || body.length == 0) {
+        return null;
+    }
+    ByteArrayInputStream bi = new ByteArrayInputStream(body);
+    ObjectInputStream oi = new ObjectInputStream(bi);
+    oi.close();
+    bi.close();
+    return oi.readObject();
+}
+```
+
+消费者拉模式封装实现：
+```java
+//首先随机拉取一个物理队列中的数据，如果返回为空，则再按顺序拉取。
+//因为当生产者发送速度大于消费者消费速度时，顺序拉取可能只拉取到第一个物理队列的数据，即“queue_0”中的数据，而其余3 个物理队列的数据可能会被长久积压。
+public GetResponse basicGet(Channel channel, String queue, boolean autoAck) throws IOException {
+    GetResponse getResponse = null;
+    Random random = new Random();
+    int index = random.nextInt(subdivisionNum);
+    getResponse = channel.basicGet(queue+"_"+index,autoAck);
+    if (getResponse == null) {
+        for(int i=0;i<subdivisionNum;i++) {
+            String queueName = queue + "_" + i;
+            getResponse = channel.basicGet(queueName, autoAck);
+            if (getResponse != null) {
+                return getResponse;
+            }
+        }
+    }
+    return getResponse;
+}
+```
+
+推模式的封装实现需要在RmqEncapsulation 类中添加一个ConcurrentLinkedDeque\<Message>类型的成员变量blockingQueue，用来缓存推送的数据以方便消费者消费。  
+消费者推模式封装实现：
+```java
+public class RmqEncapsulation {
+    //省略host、port、vhost、username、password 的定义及实现
+    private static Connection connection;
+    //分片数，表示一个逻辑队列背后的实际队列数
+    private int subdivisionNum;
+    private ConcurrentLinkedDeque<Message> blockingQueue;
+    //修改了构造函数的实现
+    public RmqEncapsulation(int subdivisionNum) {
+        this.subdivisionNum = subdivisionNum;
+        blockingQueue = new ConcurrentLinkedDeque<Message>();
+    }
+    //省略newConnection 方法、getConnection 方法、closeConnection 方法的实现
+    //省略exchangeDeclare 方法、queueDeclare 方法、queueBind 方法的实现
+    //省略basicPublish 方法和basicGet 方法的实现
+    private void startConsume(Channel channel, String queue, boolean autoAck, String consumerTag, 
+        ConcurrentLinkedDeque<Message> newblockingQueue) throws IOException {
+        for (int i = 0; i < subdivisionNum; i++) {
+            String queueName = queue + "_" + i;
+            channel.basicConsume(queueName, autoAck, consumerTag + i, new NewConsumer(channel, newblockingQueue));
+        }
+    }
+    public void basicConsume(Channel channel, String queue, boolean autoAck, String consumerTag, 
+    ConcurrentLinkedDeque<Message> newblockingQueue, IMsgCallback iMsgCallback) throws IOException {
+        startConsume(channel, queue, autoAck, consumerTag, newblockingQueue);
+        while (true) {
+            Message message = newblockingQueue.peekFirst();
+            if (message != null) {
+                ConsumeStatus consumeStatus = iMsgCallback.consumeMsg(message);
+                newblockingQueue.removeFirst();
+                if (consumeStatus == ConsumeStatus.SUCCESS) {
+                    channel.basicAck(message.getDeliveryTag(), false);
+                } else {
+                    channel.basicReject(message.getDeliveryTag(),false);
+                }
+            } else {
+                try {
+                    TimeUnit.MILLISECONDS.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+    public static class NewConsumer extends DefaultConsumer{
+        private ConcurrentLinkedDeque<Message> newblockingQueue;
+        public NewConsumer(Channel channel, ConcurrentLinkedDeque<Message> newblockingQueue) {
+            super(channel);
+            this.newblockingQueue = newblockingQueue;
+        }
+        @Override
+        public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, 
+            byte[] body) throws IOException {
+            try {
+                Message message = (Message) getObjectFromBytes(body);
+                message.setDeliveryTag(envelope.getDeliveryTag());
+                newblockingQueue.addLast(message);
+            } catch (ClassNotFoundException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+public interface IMsgCallback {
+    ConsumeStatus consumeMsg(Message message);
+}
+public enum ConsumeStatus {
+    SUCCESS,
+    FAIL
+}
+```
+
+真正在使用推模式消费时调用的方法为basicConsume，与原生客户端的方法channel.basicConsume 类似。NewConsumer 这个内部的功能只是获取Broker 中的数据然后存入RmqEncapsulation 的成员变量blockingQueue 中。这里需要关注的是basicConsume 方法中的IMsgCallback，这是包含一个回调函数consumeMsg(Message message) 的接口，consumeMsg 方法返回值为一个枚举类型ConsumeStatus，当消费端消费成功后返回ConsumeStatus.SUCCESS，反之则返回ConsumeStatus.FAIL。  
+推模式的消费示例如下：
+```java
+Channel channel = connection.createChannel();
+channel.basicQos(64);
+rmqEncapsulation.basicConsume(channel, "queue", false, "consumer_zzh", rmqEncapsulation.blockingQueue, new IMsgCallback() {
+    @Override
+    public ConsumeStatus consumeMsg(Message message) {
+        ConsumeStatus consumeStatus = ConsumeStatus.FAIL;
+        if (message!= null) {
+            System.out.println(message);
+            consumeStatus = ConsumeStatus.SUCCESS;
+        }
+        return consumeStatus;
+    }
+});
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：_以上代码示例省去了很多的功能，局限性很强。比如没有使用publisher confirm 机制；没有设置mandatory 参数；只能使用一个Connection；无法保证消息的顺序性；消息没有使用Protostuff 这种性能较高的序列化工具进行序列化和反序列化，等等。_
 
 ### 镜像队列
 

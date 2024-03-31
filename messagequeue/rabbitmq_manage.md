@@ -919,7 +919,7 @@ MNESIA_BASE=/apps/dbdat/rabbitmq/mnesia
 :---- | :----
 tcp_listeners |用来监听AMQP 连接（无SSL）。可以配置为端口号或者端口号与主机名组成的二元组。示例如下：<br>[{rabbit, [{tcp_listeners, [{"192.168.0.2", 5672}]}]}].或者[{rabbit, [{tcp_listeners, [{"127.0.0.1", 5672}, {"::1", 5672}]}]}]. 默认值为[5672]
 num_tcp_acceptors | 用来处理TCP 连接的Erlang 进程数目，默认值为10
-handshake_timeout | AMQP 0-8/0-9/0-9-1 握手(在 socket 连接和SSL 握手之后）的超时时间，单位为毫秒。默认值为10000
+handshake_timeout | AMQP 0-8/0-9/0-9-1 握手（在 socket 连接和SSL 握手之后）的超时时间，单位为毫秒。默认值为10000
 ssl_listeners | 同tcp_listeners，用于SSL 连接。默认值为[]
 num_ssl_acceptors | 用来处理SSL 连接的Erlang 进程数目，默认值为1
 ssl_options | SSL 配置。默认值为[]

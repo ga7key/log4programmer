@@ -1523,3 +1523,244 @@ Federation/Shovel | 集群
 
 ### Federation与Shovel的异同
 通过Shovel 来连接各个RabbitMQ Broker，概念上与Federation 的情形类似，不过Shovel 工作在更低一层。鉴于Federation 从一个交换器中转发消息到另一个交换器（如果必要可以确认消息是否被转发），Shovel 只是简单地从某个Broker 上的队列中消费消息，然后转发消息到另一个Broker 上的交换器而已。Shovel 也可以在单独的一台服务器上去转发消息，比如将一个队列中的数据移动到另一个队列中。如果想获得比Federation 更多的控制，可以在广域网中使用Shovel 连接各个RabbitMQ Broker 来生产或消费消息。
+
+
+## 网络分区
+### 网络分区的意义
+RabbitMQ 集群的网络分区的容错性并不是很高，一般都是使用Federation 或者Shovel 来解决广域网中的使用问题。  
+不过即使是在局域网环境下，网络分区也不可能完全避免，网络设备（比如中继设备、网卡）出现故障也会导致网络分区。当出现网络分区时，不同分区里的节点会认为不属于自身所在分区的节点都已经挂（down）了，对于队列、交换器、绑定的操作仅对当前分区有效。  
+在RabbitMQ 的默认配置下，即使网络恢复了也不会自动处理网络分区带来的问题。RabbitMQ 从3.1 版本开始会自动探测网络分区，并且提供了相应的配置来解决这个问题。  
+当一个集群发生网络分区时，这个集群会分成两个部分或者更多，它们各自为政，互相都认为对方分区内的节点已经挂了，包括队列、交换器及绑定等元数据的创建和销毁都处于自身分区内，与其他分区无关。如果原集群中配置了镜像队列，而这个镜像队列又牵涉两个或者更多个网络分区中的节点时，每一个网络分区中都会出现一个master 节点，对于各个网络分区，此队列都是相互独立的。当然也会有一些其他未知的、怪异的事情发生。当网络恢复时，网络分区的状态还是会保持，除非你采取了一些措施去解决它。  
+网络分区带来的影响大多是负面的，极端情况下不仅会造成数据丢失，还会影响服务的可用性。
+
+引入网络分区的设计理念与它本身的数据一致性复制原理有关，RabbitMQ 采用的镜像队列是一种环形的逻辑结构，这种复制原理和ZooKeeper 的Quorum 原理不同，它可以保证更强的一致性。如果出现网络波动或者网络故障等异常情况，那么整个数据链的性能就会大大降低。如果环形链中的节点出现网络异常，那么整个数据链就会被阻塞，继而相关服务也会被阻塞，所以这里就需要引入网络分区来将异常的节点剥离出整个分区，以确保RabbitMQ 服务的可用性及可靠性。等待网络恢复之后，可以进行相应的处理来将此前的异常节点加入集群中。
+
+### 网络分区的判定
+RabbitMQ 集群节点内部通信端口默认为25672，两两节点之间都会有信息交互。如果某节点出现网络故障，或者是端口不通，则会致使与此节点的交互出现中断，这里就会有个超时判定机制，继而判定网络分区。  
+对于网络分区的判定是与net_ticktime 这个参数息息相关的，此参数默认值为60 秒。注意与heartbeat_time 的区别，heartbeat_time 是指客户端与RabbitMQ 服务之间通信的心跳时间，针对5672 端口而言。  
+如果发生超时则会有net_tick_timeout 的信息报出。在RabbitMQ 集群内部的每个节点之间会每隔四分之一的net_ticktime 计一次应答（tick）。如果有任何数据被写入节点中，则此节点被认为已经被应答（ticked）了。如果连续4 次，某节点都没有被ticked，则可以判定此节点已处于“down”状态，其余节点可以将此节点剥离出当前分区。  
+将连续4 次的tick 时间记为T，那么T 的取值范围为：0.75×net_ticktime < T < 1.25×net_ticktime。  
+下图可以形象地描绘出这个取值范围的缘由。图中每个节点代表一次tick 判定的时间戳，在2 个临界值0.75×net_ticktime 和1.25×net_ticktime 之间可以连续执行4 次的tick 判定。默认情况下，在45s < T < 75s之间会判定出net_tick_timeout。  
+![ticked_value_range](../images/rabbitmq/2024-04-02_ticked_value_range.png)
+
+RabbitMQ 不仅会将队列、交换器及绑定等信息存储在Mnesia 数据库中，而且许多围绕网络分区的一些细节也都和这个Mnesia 的行为相关。
+
+##### 查看是否出现网络分区
+1. 如果一个节点不能在T时间连上另一个节点，那么Mnesia 通常认为这个节点已经挂了，就算之后两个节点又重新恢复了内部通信，但是这两个节点都会认为对方已经挂了，Mnesia 此时认定了发生网络分区的情况。这些会被记录到RabbitMQ 的服务日志之中，如下：
+```tex
+=ERROR REPORT==== 16-Oct-2017::18:20:55 ===
+Mnesia('rabbit@node1'): ** ERROR ** mnesia_event got
+    {inconsistent_database, running_partitioned_network, 'rabbit@node2'}
+```
+
+2. 采用rabbitmqctl 工具来查看，即采用rabbitmqctl cluster_status 命令。
+```bash
+# 未发生网络分区时，在partitions 这一项中没有相关记录，则说明没有产生网络分区
+[root@node1 ~]# rabbitmqctl cluster_status
+[{nodes,[{disc,[rabbit@node1,rabbit@node2,rabbit@node3]}]},
+ {running_nodes,[rabbit@node2,rabbit@node3,rabbit@node1]},
+ {cluster_name,<<"rabbit@node1">>},
+ {partitions,[]}]
+# partitions 项中有相关内容，则说明产生了网络分区
+[root@node1 ~]# rabbitmqctl cluster_status
+[{nodes,[{disc,[rabbit@node1,rabbit@node2,rabbit@node3]}]},
+ {running_nodes,[rabbit@node3,rabbit@node1]},
+ {cluster_name,<<"rabbit@node1">>},
+ {partitions,[{rabbit@node3,[rabbit@node2]},{rabbit@node1,[rabbit@node2]}]}]
+```
+
+上面partitions 项中的内容表示：  
+▶ rabbit@node3 与rabbit@node2 发生了分区，即{rabbit@node3,[rabbit@node2]}  
+▶ rabbit@node1 与rabbit@node2 发生了分区，即{rabbit@node3,[rabbit@node2]}
+
+3. 通过Web 管理界面的方式查看。如果出现了下图这种告警，即发生了网络分区。  
+![web_network_partition_exception](../images/rabbitmq/2024-04-02_web_network_partition_exception.png)
+
+4. 通过HTTP API 的方式调取节点信息来检测是否发生网络分区。比如通过curl 命令来调取节点信息：
+```bash
+curl -i -u root:root123 -H "content-type:application/json" -X GET http://localhost:15672/api/nodes
+```
+/api/nodes 这个接口返回一个JSON 字符串，详细内容可以参考附录A，其中会有partitions 的相关项，如果在其中发现partitions 项中有内容则为发生了网络分区。
+```bash
+"sockets_used": 1,
+"sockets_used_details": {
+"rate": 0
+},
+# node2 发生了网络分区
+"partitions": [
+"rabbit@node2"
+],
+"os_pid": "2155",
+"fd_total": 1024,
+"sockets_total": 829,
+```
+
+### 网络分区的模拟
+模拟网络分区的方式有多种，主要分为以下三大类：
+- iptables 封禁/解封IP 地址或者端口号。
+- 关闭/开启网卡。
+- 挂起/恢复操作系统。
+
+###### iptables 的方式
+由于RabbitMQ 集群内部节点通信端口默认为25672，可以封禁这个端口来模拟出net_tick_timeout，然后再开启此端口让集群判定网络分区的发生。  
+举例说明，整个RabbitMQ 集群由3 个节点组成，分别为node1、node2 和 node3。此时我们要模拟node2 节点被剥离出当前分区的情形，即模拟[node1, node3]和[node2]两个分区。可以在node2 上执行如下命令以封禁25672 端口。
+```bash
+iptables -A INPUT -p tcp --dport 25672 -j DROP
+iptables -A OUTPUT -p tcp --dport 25672 -j DROP
+```
+
+同时需要监测各个节点的服务日志， 当有如下相似信息出现时即为已经判定出net_tick_timeout：
+```bash
+=INFO REPORT==== 10-Oct-2017::11:53:03 ===
+rabbit on node rabbit@node2 down
+
+=INFO REPORT==== 10-Oct-2017::11:53:03 ===
+node rabbit@node2 down: net_tick_timeout
+```
+
+也可以等待75 秒（45s < T < 75s）之后以确保出现net_tick_timeout。  
+确认判定出net_tick_timeout，在恢复node2 的网络连接（即解封25672 端口）之后才会判定出现网络分区。解封命令如下：
+```bash
+iptables -D INPUT 1
+iptables -D OUTPUT 1
+```
+
+恢复node2 节点与其他节点的内部通信之后，如果此时查看集群的状态可以发现[node1, node3]和[node2]已形成两个独立的分区。
+
+---
+
+还可以使用iptables 封禁IP 地址的方法模拟网络分区。假设整个RabbitMQ 集群的节点名称与其IP 地址对应如下：
+```bash
+node1 192.168.0.2
+node2 192.168.0.3
+node3 192.168.0.4
+```
+
+如果要模拟出[node1, node3]和[node2]两个分区的情形，可以在node2 节点上执行：
+```bash
+iptables -I INPUT -s 192.168.0.2 -j DROP
+iptables -I INPUT -s 192.168.0.4 -j DROP
+# 对应的解封命令为
+iptables -D INPUT 1
+iptables -D INPUT 1
+```
+
+或者也可以分别在node1 和node3 节点上执行：
+```bash
+iptables -I INPUT -s 192.168.0.3 -j DROP
+# 对应的解封命令为
+iptables -D INPUT 1
+```
+
+---
+
+如果集群的节点部署跨网段，可以采取禁用整个网络段的方式模拟网络分区。假设RabbitMQ 集群中3 个节点和其对应的IP 关系如下：
+```bash
+node1 192.168.0.2
+node2 192.168.1.3  //注意这里的网段
+node3 192.168.0.4
+```
+
+模拟出[node1, node3]和[node2]两个分区的情形，可以在node2 节点上执行：
+```bash
+iptables -I INPUT -s 192.168.0.0/24 -j DROP
+# 对应的解封命令为
+iptables -D INPUT 1
+```
+
+###### 封禁/解封网卡的方式
+首先需要使用ifconfig 命令来查询出当前的网卡编号，一般情况下单台机器只有一个网卡（这里暂时不考虑多网卡的情形，因为对于RabbitMQ 来说，多网卡的情况造成的网络分区异常复杂。）  
+假设node1、node2 和node3 这三个节点组成RabbitMQ 集群，node2 的网卡编号为eth0，此时要模拟网络分区[node1, node3]和[node2]的情形，需要在node2 上执行以下命令关闭网卡：
+```bash
+ifdown eth0
+```
+
+待判定出net_tick_timeout 之后，再开启网卡：
+```bash
+ifup eth0
+```
+
+也可以使用service network stop 和service network start 这两个命令来模拟网络分区，原理同ifdown/ifup eth0 的方式。
+
+###### 挂起/恢复操作系统的方式
+操作系统的挂起和恢复操作也会导致集群内节点的网络分区。因为发生挂起的节点不会认为自身已经失败或者停止工作，但是集群内的其他节点会这么认为。如果集群中的一个节点运行在一台笔记本电脑上，然后你合上了笔记本电脑，那么这个节点就挂起了。或者一个更常见的现象，集群中的一个节点运行在某台虚拟机上，然后虚拟机的管理程序挂起了这个虚拟机节点，这样节点就被挂起了。在等待了(0.75×net_ticktime, 1.25×net_ticktime)这个区间大小的时间之后，判定出net_tick_timeout，再恢复挂起的节点即可以复现网络分区。
+
+### 网络分区的影响
+RabbitMQ 集群在发生网络分区之后对于数据可靠性、服务可用性、客户端的影响，这里主要针对未配置镜像和配置镜像两种情况展开探讨。
+
+#### 未配置镜像
+node1、node2 和node3 这3 个节点组成一个RabbitMQ 集群，且在这三个节点中分别创建queue1、queue2 和queue3 这三个队列，并且相应的交换器与绑定关系如下：
+
+节点名称 | 交换器 | 绑定 | 队列
+ :----: | :----: | :----: | :----:
+node1 | exchange | rk1 | queue1
+node2 | exchange | rk2 | queue2
+node3 | exchange | rk3 | queue3
+
+**情形一**  
+客户端分别连接node1 和node2 并分别向queue1 和queue2 发送消息，对应关系如下所示：
+
+客户端 | 节点名称 | 交换器 | 绑定 | 队列
+ :----: | :----: | :----: | :----: | :----:
+client1 | node1 | exchange | rk1 | queue1
+client2 | node2 | exchange | rk2 | queue2
+
+client1 那条信息表示：客户端client1 连接node1 的IP 地址，并通过路由键rk1 向交换器exchange 发送消息。如果发送成功，消息可以存入队列queue1 中。其对应的发送代码如下：
+```java
+channel.basicPublish("exchange", "rk1", true, MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes());
+```
+
+采用iptables 封禁/解封25672 端口的方式模拟网络分区，使node1 和node2 存在于两个不同的分区之中，对于客户端client1 和client2 而言，没有任何异常，消息正常发送也没有消息丢失。如果这里采用关闭/开启网卡的方式来模拟网络分区，在关闭网卡的时候客户端的连接也会关闭，这样就检测不出在网络分区发生时对客户端的影响。
+
+**情形二**  
+如果client1 连接node1 的IP，并向queue2 发送消息会发生何种情形？对应关系如下所示：
+
+客户端 | 节点名称 | 交换器 | 绑定 | 队列
+ :----: | :----: | :----: | :----: | :----:
+client1 | node1 | exchange | rk2 | queue2
+client2 | node2 | exchange | rk1 | queue1
+
+采用iptables的方式模拟网络分区，使得node1 和node2 处于两个不同的分区。  
+如果客户端在发送消息的时候将mandatory 参数设置为true，那么在网络分区之后可以通过抓包工具（如wireshark 等）看到有Basic.Return 将发送的消息返回过来。这里表示在发生网络分区之后，client1 不能将消息正确地送达到queue2 中，同样client2 不能将消息送达到queue1 中，因此消息也就不能存储。如果客户端中设置了ReturnListener 来监听Basic.Return 的信息，并附带有消息重传机制，那么在整个网络分区前后的过程中可以保证发送端的消息不丢失。  
+如果客户端没有设置mandatory 参数并且没有通过ReturnListener 进行消息重试（或者其他措施）来保障消息可靠性，那么在发送端就会有消息丢失。
+
+在网络分区之前，queue1 进程存在于node1 节点中，queue2 的进程存在于node2 节点中。在网络分区之后，在node1 所在的分区并不会创建新的queue2 进程，同样在node2 所在的分区也不会创建新的queue1 的进程。这样在网络分区发生之后，虽然可以通过rabbitmqctl list_queues name 命令在node1 节点上查看到queue2，但是在node1 上已经没有真实的queue2 进程的存在。
+
+**情形三**  
+在网络分区之前，分别有客户端连接node1 和node2 并订阅消费其上队列中的消息，对应关系如下所示：
+
+客户端 | 节点名称 | 队列
+ :----: | :----: | :----:
+client3 | node1 | queue1
+client4 | node2 | queue2
+
+client3 连接node1 的ip 并订阅消费queue1。模拟网络分区置node1 和node2 于不同的分区之中。在发生网络分区的前后，消费端client3 和client4 都能正常消费，无任何异常发生。
+
+**情形四**  
+client3 连接node1 的IP 消费queue2，对应关系如下所示：
+
+客户端 | 节点名称 | 队列
+ :----: | :----: | :----:
+client3 | node1 | queue2
+client4 | node2 | queue1
+
+在发生网络分区前，消费一切正常。在网络分区发生之后，虽然客户端没有异常报错，且可以消费到相关数据，但是此时会有一些怪异的现象发生，比如对于已消费消息的ack 会失效。在从网络分区中恢复之后，数据不会丢失。
+
+如果分区之后，重启client3 或者有个新的客户端client5 连接node1 的IP 来消费queue2，则会有如下报错：
+```bash
+com.rabbitmq.client.ShutdownSignalException: channel error; protocol method:#method<channel.close>
+(reply-code=404, reply-text=NOT_FOUND - home node
+'rabbit@node2' of durable queue 'queue2' in vhost '/' is down or inaccessible,class-id=60, method-id=20)
+```
+
+同样在node1 的服务日志中也有相关记录：
+```bash
+=ERROR REPORT==== 12-Oct-2017::14:14:48 ===
+Channel error on connection <0.9528.9> (192.168.0.9:61294 -> 192.168.0.2:5672,vhost: '/', user: 'root'), channel 1:
+{amqp_error,not_found,"home node 'rabbit@node2' of durable queue 'queue2' 
+in vhost '/' is down or inaccessible",'basic.consume'}
+```
+
+综上所述，对于未配置镜像的集群，网络分区发生之后，队列也会伴随着宿主节点而分散在各自的分区之中。  
+对于消息发送方而言，可以成功发送消息，但是会有路由失败的现象，需要配合mandatory 等机制保障消息的可靠性。  
+对于消息消费方来说，有可能会有诡异、不可预知的现象发生，比如对于已消费消息的ack 会失效。如果网络分区发生之后，客户端与某分区重新建立通信链路，其分区中如果没有相应的队列进程，则会有异常报出。如果从网络分区中恢复之后，数据不会丢失，但是客户端会重复消费。

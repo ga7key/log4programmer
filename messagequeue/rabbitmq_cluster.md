@@ -1764,3 +1764,333 @@ in vhost '/' is down or inaccessible",'basic.consume'}
 综上所述，对于未配置镜像的集群，网络分区发生之后，队列也会伴随着宿主节点而分散在各自的分区之中。  
 对于消息发送方而言，可以成功发送消息，但是会有路由失败的现象，需要配合mandatory 等机制保障消息的可靠性。  
 对于消息消费方来说，有可能会有诡异、不可预知的现象发生，比如对于已消费消息的ack 会失效。如果网络分区发生之后，客户端与某分区重新建立通信链路，其分区中如果没有相应的队列进程，则会有异常报出。如果从网络分区中恢复之后，数据不会丢失，但是客户端会重复消费。
+
+#### 已配置镜像
+如果集群中配置了镜像队列，那么在发生网络分区时，情形比未配置镜像队列的情况复杂得多，尤其是发生多个网络分区的时候。  
+集群中有node1、node2 和node3 这3 个节点，分别在这些节点上创建队列queue1、queue2 和queue3，并配置镜像队列。采用iptables 的方式将集群模拟分裂成[node1, node3]和[node2]这两个网络分区。  
+镜像队列的相关配置可以参考如下：
+```bash
+ha-mode:exactly
+ha-param:2
+ha-sync-mode:automatic
+```
+
+**情形一**  
+分区之前，3 个队列的master 镜像和slave 镜像分别做相应分布：
+
+队列 | master | slave
+ :----: | :----: | :----:
+queue1 | node1 | node3
+queue2 | node2 | node3
+queue3 | node3 | node2
+
+在发生网络分区之后，[node1, node3]分区中的队列有了新的部署。除了queue1 未发生改变，queue2 由于原宿主节点node2 已被剥离当前分区，那么node3 提升为master，同时选择node1 作为slave。在queue3 重新选择node1 作为其新的slave。对于[node2]分区而言，queue2 和queue3 的分布比较容易理解，此分区中只有一个节点，所有slave 这一列为空。但是对于queue1 而言，其部署还是和分区前如出一辙。不管是在网络分区前，还是在网络分区之后，再或者是又从网络分区中恢复，对于queue1 而言生产和消费消息都不会受到任何的影响，就如未发生过网络分区一样。对于队列queue2 和queue3 的情形可以参考上面未配置镜像的相关细节，从网络分区中恢复（即恢复成之前的[node1, node2, node3]组成的完整分区）之后可能会有数据丢失。  
+分区之后，相应分布关系如下：
+
+&nbsp; | [node1, node3]分区 | [node2]分区
+ :----: | :---- | :----
+队列 | master&emsp;&emsp;slave | master&emsp;&emsp;slave
+queue1 | node1&emsp;&emsp;node3 | node1&emsp;&emsp;node3
+queue2 | node3&emsp;&emsp;node1 | node2&emsp;&emsp;[]
+queue3 | node3&emsp;&emsp;node1 | node2&emsp;&emsp;[]
+
+**情形二**  
+分区之前，3 个队列的master 镜像和slave 镜像分别做相应分布：
+
+队列 | master | slave
+ :----: | :----: | :----:
+queue1 | node1 | node2
+queue2 | node2 | node3
+queue3 | node3 | node1
+
+分区之后：
+
+&nbsp; | [node1, node3]分区 | [node2]分区
+ :----: | :---- | :----
+队列 | master&emsp;&emsp;slave | master&emsp;&emsp;slave
+queue1 | node1&emsp;&emsp;node3 | node2&emsp;&emsp;[]
+queue2 | node3&emsp;&emsp;node1 | node2&emsp;&emsp;[]
+queue3 | node3&emsp;&emsp;node1 | node3&emsp;&emsp;node1
+
+如果要实现在ha-mode=exactly 和ha-params=2 的镜像配置下准确地指定对应的slave 镜像所在节点，可以实现编写一个脚本，命名为rmq_mirror_create.sh，具体内容如下：
+
+```bash
+rabbitmqctl clear_policy p1
+rabbitmqctl set_policy --priority 0 --apply-to queues p1 ".*" '{"ha-mode":"exactly","ha-params":2}'
+rabbitmqctl list_queues name pid slave_pids
+```
+
+之后再为rmq_mirror_create.sh 添加可执行权限：
+
+```bash
+chmod a+x rmq_mirror_create.sh
+```
+
+最后反复运行脚本直到有如下相似输出即可（主要是观察list_queues 中slave_pids 的信息）：
+
+```bash
+[root@node1 ~]# ./ rmq_mirror_create.sh
+Clearing policy "p1" ...
+Setting policy "p1" for pattern ".*" to "{\"ha-mode\":\"exactly\",\"ha-params\":2}" with priority "0" ...
+Listing queues ...
+queue1 <rabbit@node1.1.279.0> [<rabbit@node2.3.3804.1>]
+queue2 <rabbit@node2.3.1391.1> [<rabbit@node3.1.10567.0>]
+queue3 <rabbit@node3.1.9625.0> [<rabbit@node1.1.13080.1>]
+```
+
+如果镜像配置是ha-sync-mode=automatic 的情况，当有新的slave 出现时，此slave 会自动同步master 中的数据。注意在同步的过程中，集群的整个服务都不可用，客户端连接会被阻塞。如果master 中有大量的消息堆积，必然会造成slave 的同步时间增长，进一步影响了集群服务的可用性。如果配置ha-sync-mode=manual，有新的slave 创建的同时不会去同步master 上旧的数据，如果此时master 节点又发生了异常，那么此部分数据将会丢失。同样ha-promote-on-shutdown 这个参数的影响也需要考虑进来。
+
+网络分区的发生可能会引起消息的丢失，当然这点也有办法解决。首先消息发送端要有能够处理Basic.Return 的能力。其次，在监测到网络分区发生之后，需要迅速地挂起所有的生产者进程。之后连接分区中的每个节点消费分区中所有的队列数据。在消费完之后再处理网络分区。最后在从网络分区中恢复之后再恢复生产者的进程。整个过程可以最大程度上保证网络分区之后的消息的可靠性。同样也要注意的是，在整个过程中会伴有大量的消息重复，消费者客户端需要做好相应的幂等性处理。当然也可以采用集群迁移，将所有旧集群的资源都迁移到新集群来解决这个问题。
+
+### 手动处理网络分区
+为了从网络分区中恢复，首先需要挑选一个信任分区，这个分区才有决定Mnesia 内容的权限，发生在其他分区的改变将不会被记录到Mnesia 中而被直接丢弃。在挑选完信任分区之后，重启非信任分区中的节点，如果此时还有网络分区的告警，紧接着重启信任分区中的节点。
+
+这里有三个要点需要详细阐述：
+- 如何挑选信任分区？
+- 如何重启节点？
+- 重启的顺序有何考究？
+
+挑选信任分区一般可以按照这几个指标进行：  
+分区中要有disc 节点；分区中的节点数最多；分区中的队列数最多；分区中的客户端连接数最多。优先级从前到后，例如信任分区中要有disc 节点；如果有两个或者多个分区满足，则挑选节点数最多的分区作为信任分区；如果又有两个或者多个分区满足，那么挑选队列数最多的分区作为信任分区。依次类推，如果有两个或者多个分区对于这些指标都均等，那么随机挑选一个分区也不失为一良策。
+
+RabbitMQ 中有两种重启方式：
+- 第一种方式是使用rabbitmqctl stop 命令关闭，然后再用rabbitmq-server –detached 命令启动；
+- 第二种方式是使用rabbitmqctl stop_app 关闭，然后使用rabbitmqctl start_app 命令启动。
+
+第一种方式需要同时重启Erlang 虚拟机和RabbitMQ 应用，而第二种方式只是重启RabbitMQ 应用。两种方式都可以从网络分区中恢复，但是更加推荐使用第二种方式。
+
+RabbitMQ 的重启顺序也比较讲究，必须在以下两种重启顺序中择其一进行重启操作：
+1. 停止其他非信任分区中的所有节点，然后再启动这些节点。如果此时还有网络分区的告警，则再重启信任分区中的节点以去除告警。
+2. 关闭整个集群中的节点，然后再启动每一个节点，这里需要确保启动的第一个节点在信任的分区之中。
+
+在选择哪种重启顺序之前，首先考虑一下队列“漂移”的现象。所谓的队列“漂移”是在配置镜像队列的情况下才会发生的。  
+假设一共集群中有node1、node2 和node3 这三个节点，且配置全镜像（ha-mode=all），队列分布情况如下：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node1 | node2, node3
+queue2 | node2 | node3, node1
+queue3 | node3 | node2, node1
+
+**情形一**  
+这里首先关闭node3 节点，那么queue3 中的某个slave 提升为master，队列分布情况如下：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node1 | node2
+queue2 | node2 | node1
+queue3 | node2 | node1
+
+然后在再关闭node2 节点，继续演变为以下情况：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node1 | []
+queue2 | node1 | []
+queue3 | node1 | []
+
+此时，如果关闭node1 节点，然后再启动这3 个节点。或者不关闭node1 节点，而启动node2 和node3 节点都只会增加slave 的个数，而不会改变master 的分布，最终如情形如下所示。注意这里哪怕关闭了node1，然后并非先启动node1，而是先启动node2 或者node3，对于master 节点的分布都不会受影响。
+
+队列 | master | slaves(按节点启动顺序排列)
+ :----: | :---- | :----:
+queue1 | node1 | node2, node3
+queue2 | node1 | node2, node3
+queue3 | node1 | node2, node3
+
+这里就可以看出，随着节点的重启，所有的队列的master 都“漂移”到了node1 节点上，因为在RabbitMQ 中，除了发布消息，所有的操作都是在master 上完成的，如此大部分压力都集中到了node1 节点上，从而不能很好地实现负载均衡。
+
+**情形二**  
+如果在关闭节点node3 之后，又重新启动节点node3，队列分布情况如下：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node1 | node2, node3
+queue2 | node2 | node1, node3
+queue3 | node2 | node1, node3
+
+之后再重启（先关闭，后启动）node2 节点，队列分布情况如下：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node1 | node3, node2
+queue2 | node1 | node3, node2
+queue3 | node1 | node3, node2
+
+继续重启node1 节点，队列分布情况如下：
+
+队列 | master | slaves
+ :----: | :---- | :----:
+queue1 | node3 | node2, node1
+queue2 | node3 | node2, node1
+queue3 | node3 | node2, node1
+
+如此顺序演变，在配置镜像的集群中重启会有队列“漂移”的情况发生，造成负载不均衡。这里采用的是全镜像以作说明，不管如何，都难以避免队列“漂移”的发生。
+
+<span style="color: red;font-weight: bold;">Tips</span>：一定要按照前面提及的两种方式择其一进行重启。如果选择挨个节点重启的方式，同样可以处理网络分区，但是这里会有一个严重的问题，即Mnesia 内容权限的归属问题。比如有两个分区[node1, node2]和[node3, node4]，其中[node1, node2]为信任分区。此时若按照挨个重启的方式进行重启，比如先重启node3，在node3 节点启动之时无法判断其节点的Mnesia 内容是向[node1, node2]分区靠齐还是向node4 节点靠齐。至此，如果挨个一轮重启之后，最终集群中的Mnesia 数据是[node3, node4]这个非信任分区，就会造成无法估量的损失。挨个节点重启也有可能会引起二次网络分区的发生。
+
+如果原本配置了镜像队列，从发生网络分区到恢复的过程中队列可能会出现“漂移”的现象。可以重启之前先删除镜像队列的配置，这样能够在一定程度上阻止队列的“过分漂移”，即阻止可能所有队列都“漂移”到一个节点上的情况。  
+删除镜像队列的配置：
+- 可以采用rabbitmqctl 工具删除：
+```bash
+rabbitmqctl clear_policy [-p vhost] {mirror_queue_name}
+```
+
+- 可以通过Web 管理界面进行删除。
+- 可以通过HTTP API 的方式进行删除：
+```bash
+curl -s -u {username:password} -X DELETE http://localhost:15672/api/policies/default/{mirror_queue_name}
+```
+
+需要在每个分区上都执行删除镜像队列配置的操作，以确保每个分区中的镜像都被删除。
+
+--- 
+
+**具体的网络分区处理步骤如下所述**
+1. 步骤1：挂起生产者和消费者进程。这样可以减少消息不必要的丢失，如果进程数过多，情形又比较紧急，也可跳过此步骤。
+2. 步骤2：删除镜像队列的配置。
+3. 步骤3：挑选信任分区。
+4. 步骤4：关闭非信任分区中的节点。采用rabbitmqctl stop_app 命令关闭。
+5. 步骤5：启动非信任分区中的节点。采用与步骤4 对应的rabbitmqctl start_app 命令启动。
+6. 步骤6：检查网络分区是否恢复，如果已经恢复则转步骤8；如果还有网络分区的报警则转步骤7。
+7. 步骤7：重启信任分区中的节点。
+8. 步骤8：添加镜像队列的配置。
+9. 步骤9：恢复生产者和消费者的进程。
+
+### 自动处理网络分区
+RabbitMQ 提供了三种方法自动地处理网络分区：pause-minority 模式、pause-if-all-down 模式和autoheal 模式。  
+默认是ignore 模式，即不自动处理网络分区，所以在这种模式下，当网络分区的时候需要人工介入。在rabbitmq.config 配置文件中配置cluster_partition_handling 参数即可实现相应的功能。默认的ignore 模式的配置如下：
+```bash
+[{
+    rabbit, [
+        {cluster_partition_handling, ignore}
+    ]
+}].
+```
+
+#### pause-minority 模式
+当发生网络分区时，集群中的节点在观察到某些节点“down”的时候，会自动检测其自身是否处于“少数派”（分区中的节点小于或者等于集群中一半的节点数），RabbitMQ 会自动关闭这些节点的运作。根据CAP 原理，这里保障了P，即分区耐受性。这样确保了在发生网络分区的情况下，大多数节点（当然这些节点得在同一个分区中）可以继续运行。“少数派”中的节点在分区开始时会关闭，当分区结束时又会启动。  
+这里关闭是指RabbitMQ 应用的关闭，而Erlang 虚拟机并不关闭，类似于执行了rabbitmqctl stop_app 命令。处于关闭的节点会每秒检测一次是否可连通到剩余集群中，如果可以则启动自身的应用。相当于执行rabbitmqctl start_app 命令。  
+pause-minority 模式相应的配置如下：
+```bash
+[{
+    rabbit, [
+        {cluster_partition_handling, pause_minority}
+    ]
+}].
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：RabbitMQ 也会关闭不是严格意义上的大多数，比如在一个集群中只有两个节点的时候并不适合采用pause-minority 的模式，因为其中任何一个节点失败而发生网络分区时，两个节点都会关闭。当网络恢复时，有可能两个节点会自动启动恢复网络分区，也有可能仍保持关闭状态。然而如果集群中的节点数远大于2 个时，pause_minority 模式比ignore 模式更加可靠，特别是网络分区通常是由单节点网络故障而脱离原有分区引起的。  
+不过也需要考虑2v2、3v3 这种被分裂成对等节点数的分区的情况。所谓的2v2 这种对等分区表示原有集群的组成为[node1, node2, node3, node4]，由于某种原因分裂成类似[node1, node2]和[node3, node4]这两个网络分区的情形。这种情况在跨机架部署时就有可能发生，当node1 和node2 部署在机架A 上，而node3 和node4 部署在机架B 上，那么有可能机架A 与机架B 之间网络的通断会造成对等分区的出现。  
+接下来说明如何模拟对等的网络分区。可以在node1 和node2 上分别执行iptables 命令去封禁node3 和node4 的IP。如果node1、node2和node3、node4 处于不同的网段，那么也可以采用封禁网段的做法。更有甚者，可以将node1、node2 部署到物理机A 上的两台虚拟机中，然后将node3、node4 部署到物理机B 上的两台虚拟机中，之后切断物理机A 与B 之间的通信即可。  
+当对等分区出现时，会关闭这些分区内的所有节点，对于前面的[node1, node2]和[node3, node4]的例子而言，这四个节点上的RabbitMQ 应用都会被关闭。只有等待网络恢复之后，才会自动启动所有的节点以求从网络分区中恢复。
+
+#### pause-if-all-down 模式
+RabbitMQ 集群中的节点在和所配置的列表中的任何节点不能交互时才会关闭，语法为{pause_if_all_down, [nodes], ignore|autoheal}，其中[nodes]为前面所说的列表，也可称之为受信节点列表。参考配置如下：
+```bash
+[{
+    rabbit, [
+    {cluster_partition_handling, 
+        {pause_if_all_down, ['rabbit@node1'], ignore}}
+    ]
+}].
+```
+
+如果一个节点与rabbit@node1 节点无法通信时，则会关闭自身的RabbitMQ 应用。如果是rabbit@node1 本身发生了故障造成网络不可用，而其他节点都是正常的情况下，这种规则会让所有的节点中RabbitMQ 应用都关闭，待rabbit@node1 中的网络恢复之后，各个节点再启动自身应用以从网络分区中恢复。  
+pause-if-all-down 模式下有ignore 和autoheal 两种不同的配置。考虑前面
+pause-minority 模式中提及的一种情形，node1 和node2 部署在机架A 上，而node3 和node4 部署在机架B 上。此时配置{cluster_partition_handling, {pause_if_all_down,['rabbit@node1', 'rabbit@node3'], ignore}}，那么当机架A 和机架B 的通信出现异常时，由于node1 和node2 保持着通信，node3 和node4 保持着通信，这4 个节点都不会自行关闭，但是会形成两个分区，所以这样不能实现自动处理的功能。所以如果将配置中的ignore 替换成autoheal 就可以处理此种情形。
+
+#### autoheal 模式
+当认为发生网络分区时，RabbitMQ 会自动决定一个获胜（winning）的分区，然后重启不在这个分区中的节点来从网络分区中恢复。一个获胜的分区是指客户端连接最多的分区，如果产生一个平局，即有两个或者多个分区的客户端连接数一样多，那么节点数最多的一个分区就是获胜分区。如果此时节点数也一样多，将以节点名称的字典序来挑选获胜分区，相关源码如下：
+```erlang
+make_decision(AllPartitions)->
+    Sorted = lists:sort([{partition_value(P),P} || P <- AllPartitions]),
+    [[Winner | _] | Rest] = lists:reverse([P || {_, P} <- Sorted]),
+    {Winner, lists:append(Rest)}.
+partition_value(Partition) ->
+    Connections = [Res || Node <- Partition,
+        Res <- [rpc:call(Node, rabbit_networking,
+            Connections_local,[])],
+        is_list(Res)],
+    {length(lists:append(Connections)), length(Partition)}.
+```
+
+autoheal 模式参考配置如下：
+```bash
+[{
+    rabbit, [
+        {cluster_partition_handling, autoheal}
+    ]
+}].
+```
+
+autoheal 模式在判定出net_tick_timeout 之时不做动作，要等到网络恢复之时，在判定出网络分区之后才会有相应的动作，即重启非获胜分区中的节点。  
+在autoheal 模式下，如果集群中有节点处于非运行状态，那么当发生网络分区的时候，将不会有任何自动处理的动作。
+
+##### 挑选哪种模式
+允许RabbitMQ 能够自动处理网络分区并不一定会有正面的成效，也有可能会带来更多的问题。网络分区会导致RabbitMQ 集群产生众多的问题，需要对遇到的问题做出一定的选择。如果置RabbitMQ 于一个不可靠的网络环境下，需要使用Federation 或者Shovel。就算从网络分区中恢复了之后，也要谨防发生二次网络分区。  
+每种模式都有自身的优缺点，没有哪种模式是万无一失的，希望根据实际情形做出相应的选择，下面简要概论以下4 个模式：
+- ignore 模式：发生网络分区时，不做任何动作，需要人工介入。
+- pause-minority 模式：对于对等分区的处理不够优雅，可能会关闭所有的节点。一般情况下，可应用于非跨机架、奇数节点数的集群中。
+- pause-if-all-down 模式：对于受信节点的选择尤为考究，尤其是在集群中所有节点硬件配置相同的情况下。此种模式可以处理对等分区的情形。
+- autoheal 模式：可以处于各个情形下的网络分区。但是如果集群中有节点处于非运行状态，则此种模式会失效。
+
+### 案例：多分区情形
+之前的讨论大多基于分成两个分区的情形。在实际应用中，如果集群中节点所在物理机是多网卡，当某节点网卡发生故障就有可能会发生多个分区的情形。
+
+案例：集群中有6 个节点，分别为node1、node2、node3、node4、node5 和node6，每个节点所在物理机都是4 网卡（网卡名称分别为eth0、eth1、eth2 和eth3）配置，并采用bind0 的绑定模式。当node6 的eth0 故障之后，整个集群演变成为了6 个分区，即每个节点为一个独立的分区。  
+网络分区之前，集群中的各个节点相互通信，为了简要说明，先只展示node1、node3 和node6 节点。如下图：  
+![multi_partition](../images/rabbitmq/2024-04-03_multi_partition.png)
+
+若node6 的网被关闭之后，对于bond0 的网卡绑定模式，交换机无法感知eth0 网卡的故障，但是node6 节点能够感知本地eth0 的故障。对于node3 节点而言，其与node6 的eth0 网卡建立的长连接没有被关闭，node3 会向node6 重试发送数据（TCP retransmission），但是node6 节点无法回应。除非主动关闭或者等待长连接超时（默认为7200s，即2 小时），此条链路才会被关闭。  
+当node6 网卡关闭之后，node1、node3 和node6 有如下变化：
+1. 与node6 上eth0 相关的链路不通，node3 此时需要等待net_ticktime 的超时。节点node3 中的相关日志如下：
+```bash
+rabbit on node 'rabbit@node6' down
+node 'rabbit@node6' down: net_tick_timeout
+```
+
+2. 待超时之后，主动关闭连接。节点node3 的相关日志如下：
+```bash
+node 'rabbit@node6' down: connection_closed
+```
+与此同时Erlang 虚拟机尝试让node3 与node6 重新建立连接，由于node6 上的其他网卡正常，最后node3 和node6 可以建立。
+```bash
+node 'rabbit@node6' up
+```
+
+3. 判定node3 和node6 之间产生了网络分区。
+```bash
+Mnesia('rabbit@node3'): ** ERROR ** mnesia_event got {inconsistent_database,
+running_partitioned_network, 'rabbit@node6'}
+```
+
+4. 到这里还没有结束，网络分区会继续演变。此时node3 和node1 还处于连通状态，同样node6 和node1 也处于连通状态。进一步查看node3 的日志如下，这段日志是说：node3 和node6 之间发生了网络分区，但是node3 又发现node1 和node6 内部通信还没有断，此时认为node1 和node6 处于同一个分区，那么node3 就准备主动关闭与node1 之间的内部通信，最后node3 和node1 之间也发生了分区。与此同时，对于节点node6 而言，node1 和node3 还处于同一个分区，那么node6 也要将node1 置于node6 本身的分区之外。最后node1、node3 与node6 都处于不同的网络分区。
+
+```bash
+Partial partition detected:
+* We saw DOWN from rabbit@node6
+* We can still see rabbit@node1 which can see rabbit@node6
+We will therefore intentionally disconnect from rabbit@node1
+```
+
+5. 继续查看node1 中的日志，可以看到node1 此时察觉到node4 与node3 之间还有内部通信交换，那么就会主动将node4剥离出自身的分区。如此演变，最终node1、node2、node3、node4、node5 和node6 处于6 个不同的分区。
+
+```bash
+=ERROR REPORT==== 16-Oct-2017::14:20:54 ===
+Partial partition detected:
+* We saw DOWN from rabbit@node3
+* We can still see rabbit@node4 which can see rabbit@node3
+We will therefore intentionally disconnect from rabbit@node4
+=INFO REPORT==== 16- Oct -2017::14:20:55 ===
+rabbit on node 'rabbit@node4' down
+=INFO REPORT==== 16- Oct -2017::14:20:55 ===
+node 'rabbit@node4' down: disconnect
+=INFO REPORT==== 16- Oct -2017::14:20:55 ===
+node 'rabbit@node4' up
+=ERROR REPORT==== 16- Oct -2017::14:20:55 ===
+Mnesia('rabbit@node1'): ** ERROR ** mnesia_event got
+{inconsistent_database, running_partitioned_network, 'rabbit@node4
+```
+
+**在此种故障下， 如果选择自动处理网络分区会有什么不同的效果呢？**  
+对于pause_if_all_down 模式而言，如果挑选1 个节点作为受信节点，那么会重启剩余的5 个节点以作恢复。对于autoheal 同样如此，且查看日志可以发现，autoheal 会等网络分区判定之后罗列出所有分区信息，然后再重启非获胜分区中的节点，同样需要重启5 个节点。然而对于pause_minority 的配置而言，对此种情形的处理要优雅很多，当有节点检测到net_tick_timeout 之后会自行重启当前节点，这样就阻止了网络分区进一步演变，且处理效率最高。

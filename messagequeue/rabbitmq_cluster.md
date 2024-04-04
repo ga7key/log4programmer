@@ -2094,3 +2094,545 @@ Mnesia('rabbit@node1'): ** ERROR ** mnesia_event got
 
 **在此种故障下， 如果选择自动处理网络分区会有什么不同的效果呢？**  
 对于pause_if_all_down 模式而言，如果挑选1 个节点作为受信节点，那么会重启剩余的5 个节点以作恢复。对于autoheal 同样如此，且查看日志可以发现，autoheal 会等网络分区判定之后罗列出所有分区信息，然后再重启非获胜分区中的节点，同样需要重启5 个节点。然而对于pause_minority 的配置而言，对此种情形的处理要优雅很多，当有节点检测到net_tick_timeout 之后会自行重启当前节点，这样就阻止了网络分区进一步演变，且处理效率最高。
+
+
+## 负载均衡
+面对大量业务访问、高并发请求，可以使用高性能的服务器来提升RabbitMQ 服务的负载能力。当单机容量达到极限时，可以采取集群的策略来对负载能力做进一步的提升，但这里还存在一个负载不均衡的问题。试想如果一个集群中有3 个节点，那么所有的客户端都与其中的单个节点node1 建立TCP 连接，那么node1 的网络负载必然会大大增加而显得难以承受，其他节点又由于没有那么多的负载而造成硬件资源的浪费，所以负载均衡显得尤为重要。  
+对于RabbitMQ 而言，客户端与集群建立的TCP 连接不是与集群中所有的节点建立连接，而是挑选其中一个节点建立连接。如图所示，在引入了负载均衡之后，各个客户端的连接可以分摊到集群的各个节点之中，进而避免了前面所讨论的缺陷。  
+![load_balance](../images/rabbitmq/2024-04-04_load_balance.png)
+
+负载均衡（Load balance）是一种计算机网络技术，用于在多个计算机（计算机集群）、网络连接、CPU、磁盘驱动器或其他资源中分配负载，以达到最佳资源使用、最大化吞吐率、最小响应时间及避免过载的目的。使用带有负载均衡的多个服务器组件，取代单一的组件，可以通过冗余提高可靠性。  
+负载均衡通常分为软件负载均衡和硬件负载均衡两种：
+- **软件负载均衡**是指在一个或者多个交互的网络系统中的多台服务器上安装一个或多个相应的负载均衡软件来实现的一种均衡负载技术。软件可以很方便地安装在服务器上，并且实现一定的均衡负载功能。软件负载均衡技术配置简单、操作也方便，最重要的是成本很低。
+- **硬件负载均衡**是指在多台服务器间安装相应的负载均衡设备，也就是负载均衡器（如F5）来完成均衡负载技术，与软件负载均衡技术相比，能达到更好的负载均衡效果。由于硬件负载均衡技术需要额外增加负载均衡器，成本比较高，所以适用于流量高的大型网站系统。
+
+目前主流的对RabbitMQ 集群使用软件负载均衡的方式有在客户端内部实现负载均衡，或者使用HAProxy、LVS 等负载均衡软件来实现。
+
+#### 客户端内部实现负载均衡
+对于RabbitMQ 而言可以在客户端连接时简单地使用负载均衡算法来实现负载均衡。负载均衡算法有很多种，主流的有以下几种。
+
+1. 轮询法  
+将请求按顺序轮流地分配到后端服务器上，它均衡地对待后端的每一台服务器，而不关心服务器实际的连接数和当前的系统负载。
+```java
+public class RoundRobin {
+    private static List<String> list = new ArrayList<String>(){{
+        add("192.168.0.2");
+        add("192.168.0.3");
+        add("192.168.0.4");
+    }};
+    private static int pos = 0;
+    private static final Object lock = new Object();
+    //调用该方法来获取相应的连接地址
+    public static String getConnectionAddress(){
+        String ip = null;
+        synchronized (lock) {
+            ip = list.get(pos);
+            if (++pos >= list.size()) {
+                pos = 0;
+            }
+        }
+        return ip;
+    }
+}
+```
+
+2. 加权轮询法  
+不同的后端服务器的配置可能和当前系统的负载并不相同，因此它们的抗压能力也不相同。给配置高、负载低的机器配置更高的权重，让其处理更多的请求；而配置低、负载高的集群，给其分配较低的权重，降低其系统负载，加权轮询能很好地处理这一问题，并将请求顺序和权重分配到后端。
+
+3. 随机法  
+通过随机算法，根据后端服务器的列表大小值来随机选取其中的一台服务器进行访问。由概率统计理论可以得知，随着客户端调用服务端的次数增多，其实际效果越来越接近于平均分配调用量到后端的每一台服务器，也就是轮询的结果。
+```java
+public class RandomAccess {
+    private static List<String> list = new ArrayList<String>(){{
+        add("192.168.0.2");
+        add("192.168.0.3");
+        add("192.168.0.4");
+    }};
+    public static String getConnectionAddress(){
+        Random random = new Random();
+        int pos = random.nextInt(list.size());
+        return list.get(pos);
+    }
+}
+```
+
+4. 加权随机法  
+与加权轮询法一样，加权随机法也根据后端机器的配置、系统的负载分配不同权重。不同的是，它按照权重随机请求后端服务器，而非顺序。
+
+5. 源地址哈希法  
+源地址哈希的思想是根据获取的客户端IP 地址，通过哈希函数计算得到的一个数值，用该数值对服务器列表的大小进行取模运算，得到的结果便是客户端要访问服务器的序号。采用源地址哈希法进行负载均衡，同一IP 地址的客户端，当后端服务器列表不变时，它每次都会映射到同一台后端服务器进行访问。
+```java
+public class IpHash {
+    private static List<String> list = new ArrayList<String>(){{
+        add("192.168.0.2");
+        add("192.168.0.3");
+        add("192.168.0.4");
+    }};
+    public static String getConnectionAddress() throws UnknownHostException {
+        int ipHashCode = InetAddress.getLocalHost().getHostAddress().hashCode();
+        int pos = ipHashCode % list.size();
+        return list.get(pos);
+    }
+}
+```
+
+6. 最小连接数法  
+最小连接数算法比较灵活和智能，由于后端服务器的配置不尽相同，对于请求的处理有块有慢，它根据后端服务器当前的连接情况，动态地选取其中当前积压连接数最少的一台服务器来处理当前的请求，尽可能地提高后端服务的利用效率，将负载合理地分流到每一台服务器。
+
+#### 使用HAProxy 实现负载均衡
+HAProxy 提供高可用性、负载均衡及基于TCP 和HTTP 应用的代理，支持虚拟主机，它是免费、快速并且可靠的一种解决方案，包括Twitter、Reddit、StackOverflow、GitHub 在内的多家知名互联网公司在使用。HAProxy 实现了一种事件驱动、单一进程模型，此模型支持非常大的并发连接数。
+
+- 安装HAProxy  
+首先需要去HAProxy 的官网下载HAProxy 的安装文件， 目前最新的版本为haproxy-1.7.8.tar.gz。下载地址为http://www.haproxy.org/#down ，相关文档地址为http://www.haproxy.org/#doc1.7
+
+将haproxy-1.7.8.tar.gz 复制至/opt 目录下，与RabbitMQ 存放在同一个目录中，之后进行解压缩：
+
+```bash
+[root@node1 opt]# tar zxvf haproxy-1.7.8.tar.gz
+```
+
+将源码解压之后，需要运行make 命令来将HAProxy 编译为可执行程序。在执行make 之前需要先选择目标平台，通常对于UNIX 系的操作系统可以选择TARGET=generic。下面是详细操作：
+
+```bash
+[root@node1 opt]# cd haproxy-1.7.8
+[root@node1 haproxy-1.7.8]# make TARGET=generic
+gcc -Iinclude -Iebtree -Wall -O2 -g -fno-strict-aliasing
+    -Wdeclaration-after-statement -fwrapv
+-DTPROXY -DENABLE_POLL
+-DCONFIG_HAPROXY_VERSION=\"1.7.8\"
+-DCONFIG_HAPROXY_DATE=\"2017/07/07\" \
+    -DBUILD_TARGET='"generic"' \
+    -DBUILD_ARCH='""' \
+    -DBUILD_CPU='"generic"' \
+    -DBUILD_CC='"gcc"' \
+    -DBUILD_CFLAGS='"-O2 -g -fno-strict-aliasing -Wdeclaration-after-statement
+        -fwrapv"' \
+    -DBUILD_OPTIONS='""' \
+    -c -o src/haproxy.o src/haproxy.c
+gcc -Iinclude -Iebtree -Wall -O2 -g -fno-strict-aliasing
+    -Wdeclaration-after-statement -fwrapv...
+...
+gcc -g -o haproxy src/haproxy.o src/base64.o src/protocol.o src/uri_auth.o ...
+```
+
+编译完目录下有名为“haproxy”的可执行文件。之后在/etc/profile 中加入haproxy 的路径，内容如下：
+
+```bash
+export PATH=$PATH:/opt/haproxy-1.7.8/haproxy
+```
+
+最后执行source/etc/profile 让此环境变量生效。
+
+- 配置HAProxy  
+HAProxy 使用单一配置文件来定义所有属性，包括从前端IP 到后端服务器。
+
+下面的代码展示了用于3 个RabbitMQ 节点组成集群的负载均衡配置。  
+配置相关环境说明如下所述：  
+▶ HAProxy 主机：192.168.0.9 5671  
+▶ RabbitMQ 1：192.168.02 5672  
+▶ RabbitMQ 2：192.168.03 5672  
+▶ RabbitMQ 3：192.168.04 5672  
+
+```bash
+# HAProxy 的配置
+#全局配置
+global
+    #日志输出配置，所有日志都记录在本机，通过local0 输出
+    log 127.0.0.1 local0 info
+    #最大连接数
+    maxconn 4096
+    #改变当前的工作目录
+    chroot /opt/haproxy-1.7.8
+    #以指定的UID 运行haproxy 进程
+    uid 99
+    #以指定的GID 运行haproxy 进程
+    gid 99
+    #以守护进程方式运行haproxy #debug #quiet
+    daemon
+    #debug
+    #当前进程pid 文件
+    pidfile /opt/haproxy-1.7.8/haproxy.pid
+#默认配置
+defaults
+    #应用全局的日志配置
+    log global
+    #默认的模式mode{tcp|http|health}
+    #TCP 是4 层，HTTP 是7 层，health 只返回OK
+    mode tcp
+    #日志类别tcplog
+    option tcplog
+    #不记录健康检查日志信息
+    option dontlognull
+    #3 次失败则认为服务不可用
+    retries 3
+    #每个进程可用的最大连接数
+    maxconn 2000
+    #连接超时
+    timeout connect 5s
+    #客户端超时
+    timeout client 120s
+    #服务端超时
+    timeout server 120s
+#绑定配置
+listen rabbitmq_cluster :5671
+    #配置TCP 模式
+    mode tcp
+    #简单的轮询
+    balance roundrobin
+    #RabbitMQ 集群节点配置
+    server rmq_node1 192.168.0.2:5672 check inter 5000 rise 2 fall 3 weight 1
+    server rmq_node2 192.168.0.3:5672 check inter 5000 rise 2 fall 3 weight 1
+    server rmq_node3 192.168.0.4:5672 check inter 5000 rise 2 fall 3 weight 1
+#haproxy 监控页面地址
+listen monitor :8100
+    mode http
+    option httplog
+    stats enable
+    stats uri /stats
+    stats refresh 5s
+```
+
+在前面的配置中“listen rabbitmq_cluster bind 192.168.0.9.5671”定义了客户端连接IP 地址和端口号。这里配置的负载均衡算法是roundrobin，注意roundrobin 是加权轮询。  
+和RabbitMQ 最相关的是“server rmq_node1 192.168.0.2:5672 check inter 5000 rise 2 fall 3 weight 1”此类型的3 条配置，它定义了RabbitMQ 服务的负载均衡细节，其中包含6 个部分：  
+1. server \<name>：定义RabbitMQ 服务的内部标识，注意这里的“rmq_node1”是指包含有含义的字符串名称，不是指RabbitMQ 的节点名称。
+2. \<ip>:\<port>：定义RabbitMQ 服务连接的IP 地址和端口号。
+3. check inter \<value>：定义每隔多少毫秒检查RabbitMQ 服务是否可用。
+4. rise \<value>：定义RabbitMQ 服务在发生故障之后，需要多少次健康检查才能被再次确认可用。
+5. fall \<value>：定义需要经历多少次失败的健康检查之后，HAProxy 才会停止使用此RabbitMQ 服务。
+6. weight \<value>：定义当前RabbitMQ 服务的权重。
+
+HAProxy 的配置代码中最后一段配置定义的是HAProxy 的数据统计页面。数据统计页面包含各个服务节点的状态、连接、负载等信息。在调用haproxy -f haproxy.cfg 命令运行HAProxy 服务之后，可以在浏览器上输入http://192.168.0.9:8100/stats 来加载相关的页面。
+
+#### 使用Keepalived 实现高可靠负载均衡
+如果前面配置的HAProxy 主机192.168.0.9 突然宕机或者网卡失效，那么虽然RabbitMQ 集群没有任何故障，但是对于外界的客户端来说所有的连接都会被断开，结果将是灾难性的。确保负载均衡服务的可靠性同样显得十分重要。这里就需要引入Keepalived 工具，它能够通过自身健康检查、资源接管功能做高可用（双机热备），实现故障转移。
+
+Keepalived 采用VRRP（Virtual Router Redundancy Protocol，虚拟路由冗余协议），以软件的形式实现服务的热备功能。通常情况下是将两台Linux 服务器组成一个热备组（Master 和Backup），同一时间内热备组只有一台主服务器Master 提供服务，同时Master 会虚拟出一个公用的虚拟IP 地址，简称VIP。这个VIP 只存在于Master 上并对外提供服务。如果Keepalived 检测到Master 宕机或者服务故障，备份服务器Backup 会自动接管VIP 并成为Master，Keepalived 将原Master 从热备组中移除。当原Master 恢复后，会自动加入到热备组，默认再抢占成为Master，起到故障转移的功能。  
+Keepalived 工作在OSI 模型中的第3 层、第4 层和第7 层。  
+工作在第3 层是指Keepalived 会定期向热备组中的服务器发送一个ICMP 数据包来判断某台服务器是否故障，如果故障则将这台服务器从热备组移除。  
+工作在第4 层是指Keepalived 以TCP 端口的状态判断服务器是否故障，比如检测RabbitMQ的5672 端口，如果故障则将这台服务器从热备组中移除。  
+工作在第7 层是指Keepalived 根据用户设定的策略（通常是一个自定义的检测脚本）判断服务器上的程序是否正常运行，如果故障将这台服务器从热备组移除。
+
+1. Keepalived 的安装  
+首先需要去Keepalived 的官网下载安装文件，目前最新的版本为keepalived-1.3.5.tar.gz，下载地址为http://www.keepalived.org/download.html
+
+将keepalived-1.3.5.tar.gz 解压并安装，详细步骤如下：
+
+```bash
+[root@node1 ~]# tar zxvf keepalived-1.3.5.tar.gz
+[root@node1 ~]# cd keepalived-1.3.5
+[root@node1 keepalived-1.3.5]# ./configure --prefix=/opt/keepalived --withinit=SYSV
+#注：(upstart|systemd|SYSV|SUSE|openrc) #根据你的系统选择对应的启动方式
+[root@node1 keepalived-1.3.5]# make
+[root@node1 keepalived-1.3.5]# make install
+```
+
+之后将安装过后的Keepalived 加入系统服务中，详细步骤如下（注意千万不要输错命令）：
+
+```bash
+#复制启动脚本到/etc/init.d/下
+[root@node1 ~]# cp /opt/keepalived/etc/rc.d/init.d/keepalived /etc/init.d/
+[root@node1 ~]# cp /opt/keepalived/etc/sysconfig/keepalived /etc/sysconfig
+[root@node1 ~]# cp /opt/keepalived/sbin/keepalived /usr/sbin/
+[root@node1 ~]# chmod +x /etc/init.d/keepalived
+[root@node1 ~]# chkconfig --add keepalived
+[root@node1 ~]# chkconfig keepalived on
+#Keepalived 默认会读取/etc/keepalived/keepalived.conf 配置文件
+[root@node1 ~]# mkdir /etc/keepalived
+[root@node1 ~]# cp /opt/keepalived/etc/keepalived/keepalived.conf /etc/keepalived/
+```
+
+执行完之后就可以使用如下命令来重启、启动、关闭和查看keepalived 状态：
+
+```bash
+service keepalived restart
+service keepalived start
+service keepalived stop
+service keepalived status
+```
+
+2. 配置  
+在安装的时候我们已经创建了/etc/keepalived 目录，并将keepalived.conf 配置文件复制到此目录下，如此Keepalived 便可以读取这个默认的配置文件了。如果要将Keepalived 与前面的HAProxy 服务结合起来需要更改/etc/keepalived/keepalived.conf 这个配置文件。
+
+如下图所示，两台Keepalived 服务器之间通过VRRP 进行交互，对外部虚拟出一个VIP 为192.168.0.10。Keepalived 与HAProxy 部署在同一台机器上，两个Keepalived 服务实例匹配两个HAProxy 服务实例，这样通过Keeaplived 实现HAProxy 的双机热备。所以在上一节的192.168.0.9 的基础之上，还要再部署一台HAProxy 服务，IP 地址为192.168.0.8。  
+![VRRP_interaction](../images/rabbitmq/2024-04-04_VRRP_interaction.png) _通过VRRP交互_
+
+整条调用链路为：客户端通过VIP 建立通信链路；通信链路通过Keeaplived 的Master 节点路由到对应的HAProxy 之上；HAProxy 通过负载均衡算法将负载分发到集群中的各个节点之上。正常情况下客户端的连接通过上图中左侧部分进行负载分发。当Keepalived 的Master 节点挂掉或者HAProxy 挂掉无法恢复时，Backup 提升为Master，客户端的连接通过上图中右侧部分进行负载分发。
+
+接下来修改/etc/keepalived/keepalived.conf 文件，在Keepalived 的Master 上配置详情如下：
+```bash
+#Keepalived 配置文件
+global_defs {
+    router_id NodeA #路由ID、主/备的ID 不能相同
+}
+#自定义监控脚本
+vrrp_script chk_haproxy {
+    script "/etc/keepalived/check_haproxy.sh"
+    interval 5
+    weight 2
+}
+vrrp_instance VI_1 {
+    state MASTER #Keepalived 的角色。Master 表示主服务器，从服务器设置为BACKUP
+    interface eth0 #指定监测网卡
+    virtual_router_id 1
+    priority 100 #优先级，BACKUP 机器上的优先级要小于这个值
+    advert_int 1 #设置主备之间的检查时间，单位为s
+    authentication { #定义验证类型和密码
+        auth_type PASS
+        auth_pass root123
+    }
+    track_script {
+        chk_haproxy
+    }
+    virtual_ipaddress { #VIP 地址，可以设置多个
+        192.168.0.10
+    }
+}
+```
+
+Backup 中的配置大致和Master 中的相同，不过需要修改global_defs{}的router_id，比如设置为“NodeB”；其次要修改vrrp_instance VI_1{}中的state 为“BACKUP”；最后要将priority 设置为小于100 的值。注意Master 和Backup 中的virtual_router_id 要保持一致。下面简要地展示一下Backup 的配置：
+```bash
+global_defs {
+    router_id NodeB
+}
+vrrp_script chk_haproxy {
+    ...
+}
+vrrp_instance VI_1 {
+    state BACKUP
+    ...
+    priority 50
+    ...
+}
+```
+
+为了防止HAProxy 服务挂掉之后Keepalived 还在正常工作而没有切换到Backup 上，所以这里需要编写一个脚本来检测HAProxy 服务的状态。当HAProxy 服务挂掉之后该脚本会自动重启HAProxy 的服务，如果不成功则关闭Keepalived 服务，如此便可以切换到Backup 继续工作。这个脚本就对应了上面配置vrrp_script chk_haproxy{}中的script 对应的值，/etc/keepalived/check_haproxy.sh 的内容如下所示（记得添加可执行权限）。  
+```bash
+#!/bin/bash
+if [ $(ps -C haproxy --no-header | wc -l) -eq 0 ];then
+    haproxy -f /opt/haproxy-1.7.8/haproxy.cfg
+fi
+sleep 2
+if [ $(ps -C haproxy --no-header | wc -l) -eq 0 ];then
+    service keepalived stop
+fi
+```
+
+如此配置好之后，使用service keepalived start 命令启动192.168.0.8 和192.168.0.9 中的Keepalived 服务即可。之后客户端的应用可以通过192.168.0.10 这个IP 地址来接通RabbitMQ 服务。
+
+3. 查看Keepalived 运行情况  
+可以通过tail -f /var/log/messages -n 200 命令查看相应的Keepalived 日志输出。  
+Master 启动之后可以通过ip add show 命令查看添加的VIP（Backup 节点是没有VIP 的）：
+
+```bash
+[root@node1 ~]# ip add show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet6 ::1/128 scope host
+        valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc pfifo_fast state UP
+    qlen 1000
+    link/ether fa:16:3e:5e:7a:f7 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.8/18 brd 10.198.255.255 scope global eth0
+    # VIP
+    inet 192.168.0.10/32 scope global eth0
+    inet6 fe80::f816:3eff:fe5e:7af7/64 scope link
+        valid_lft forever preferred_lft forever
+```
+
+在Master 节点执行service keepalived stop 模拟异常关闭的情况，观察Master 的日志，对应的Master 上的VIP 也会消失。  
+Master 关闭后，Backup 会提升为新的Master，可以观察Backup 的日志。通过ip add show 命令可以看到新的Master 节点上虚拟出了VIP，如下所示：
+```bash
+[root@node2 ~]# ip add show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet6 ::1/128 scope host
+        valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc pfifo_fast state UP
+    qlen 1000
+    link/ether fa:16:3e:23:ac:ec brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.9/18 brd 10.198.255.255 scope global eth0
+    # VIP
+    inet 192.168.0.10/32 scope global eth0
+    inet6 fe80::f816:3eff:fe23:acec/64 scope link
+        valid_lft forever preferred_lft forever
+```
+
+Keeaplived 的出现让HAProxy 的负载均衡服务更加可靠。如果想要追求要更高的可靠性，可以加入多个Backup 角色的Keepalived 节点来实现一主多从的多机热备。当然这样会提升硬件资源的成本，该如何抉择需要更细致的考量，一般情况下双机热备的配备已足够满足应用需求。
+
+#### 使用Keepalived+LVS 实现负载均衡
+LVS 是Linux Virtual Server 的简称，也就是Linux 虚拟服务器，是一个由章文嵩博士发起的自由软件项目，它的官方站点是linuxvirtualserver.org。现在LVS 已经是 Linux 标准内核的一部分，在Linux2.6.32 内核以前，使用LVS 时必须要重新编译内核以支持LVS 功能模块，但是从Linux2.6.32 内核以后，已经完全内置了LVS 的各个功能模块，无须给内核打任何补丁，可以直接使用LVS 提供的各种功能。  
+LVS 是4 层负载均衡，也就是说建立在OSI 模型的传输层之上。LVS 支持TCP/UDP 的负载均衡，相对于其他高层负载均衡的解决方案，比如DNS 域名轮流解析、应用层负载的调度、客户端的调度等，它是非常高效的。LVS 自从1998 年开始，发展到现在已经是一个比较成熟的技术项目了。可以利用LVS 技术实现高可伸缩的、高可用的网络服务。例如，WWW 服务、Cache 服务、DNS 服务、FTP 服务、MAIL 服务、视频/音频点播服务等。有许多比较著名网站和组织都在使用LVS 架设的集群系统。例如，Linux 的门户网站（linux.com）、向RealPlayer 提供音频视频服务而闻名的Real 公司（real.com）、全球最大的开源网站（sourceforge.net）等。
+
+LVS 主要由3 部分组成：
+- 负载调度器（Load Balancer/Director）：它是整个集群对外面的前端机，负责将客户的请求发送到一组服务器上执行，而客户认为服务是来自一个IP 地址（VIP）上的。
+- 服务器池（Server Pool/RealServer）：一组真正执行客户端请求的服务器，如RabbitMQ 服务器。
+- 共享存储（Shared Storage）：它为服务器池提供一个共享的存储区，这样很容易使服务器池拥有相同的内容，提供相同的服务。
+
+目前LVS 的负载均衡方式也分为三种：
+- VS/NAT：Virtual Server via Network Address Translation 的简称。VS/NAT 是一种最简单的方式，所有的RealServer 只需要将自己的网关指向Director 即可。客户端可以是任意的操作系统，但此方式下一个Director 能够带动的RealServer 比较有限。
+- VS/TUN：Virtual Server via IP Tunneling 的简称。IP 隧道（IP Tunneling）是将一个IP 报文封装再另一个IP 报文的技术，这可以使目标为一个IP 地址的数据报文能够被封装和转发到另一个IP 地址。IP 隧道技术也可以称之为IP 封装技术（IP encapsulation）。
+- VS/DR：即Virtual Server via Direct Routing 的简称。VS/DR 方式是通过改写报文中的MAC 地址部分来实现的。Director 和RealServer 必须在物理上有一个网卡通过不间断的局域网相连。RealServer 上绑定的VIP 配置在各自Non-ARP 的网络设备上（如lo 或tunl），Director 的VIP 地址对外可见，而RealServer 的VIP 对外是不可见的。RealServer 的地址既可以是内部地址，也可以是真实地址。
+
+对于LVS 而言配合Keepalived 一起使用同样可以实现高可靠的负载均衡，对于上面“通过VRRP交互”图示中的结构，LVS 可以完全替代HAProxy 而其他内容可以保持不变。LVS 不需要额外的配置文件，直接集成在Keepalived 的配置文件之中。修改/etc/keepalived/keepalived.conf 文件内容如下：
+```bash
+#Keepalived 配置文件（Master）
+global_defs {
+    router_id NodeA #路由ID、主/备的ID 不能相同
+}
+vrrp_instance VI_1 {
+    state MASTER #Keepalived 的角色。Master 表示主服务器，从服务器设置为BACKUP
+    interface eth0 #指定监测网卡
+    virtual_router_id 1
+    priority 100 #优先级，BACKUP 机器上的优先级要小于这个值
+    advert_int 1 #设置主备之间的检查时间，单位为s
+    authentication { #定义验证类型和密码
+        auth_type PASS
+        auth_pass root123
+    }
+    track_script {
+        chk_haproxy
+    }
+    virtual_ipaddress { #VIP 地址，可以设置多个：
+        192.168.0.10
+    }
+}
+virtual_server 192.168.0.10 5672 { #设置虚拟服务器
+    delay_loop 6 #设置运行情况检查时间，单位是秒
+    #设置负载调度算法，共有rr、wrr、lc、wlc、lblc、lblcr、dh、sh 这8 种
+    lb_algo wrr #这里是加权轮询
+    lb_kind DR #设置LVS 实现的负载均衡机制方式VS/DR
+    #指定在一定的时间内来自同一IP 的连接将会被转发到同一RealServer 中
+    persistence_timeout 50
+    protocal TCP #指定转发协议类型，有TCP 和UDP 两种
+    #这个real_server 即LVS 的三大部分之一的RealServer，这里特指RabbitMQ 的服务
+    real_server 192.168.0.2 5672 { #配置服务节点
+        weight 1 #配置权重
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 5672
+        }
+    }
+    real_server 192.168.0.3 5672 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 5672
+        }
+    }
+    real_server 192.168.0.4 5672 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 5672
+        }
+    }
+}
+#为RabbitMQ 的RabbitMQ Management 插件设置负载均衡
+virtual_server 192.168.0.10 15672 {
+    delay_loop 6
+    lb_algo wrr
+    lb_kind DR
+    persistence_timeout 50
+    protocal TCP
+    real_server 192.168.0.2 15672 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 15672
+        }
+    }
+    real_server 192.168.0.3 15672 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 15672
+        }
+    }
+    real_server 192.168.0.4 15672 {
+        weight 1
+        TCP_CHECK {
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+            connect_port 15672
+        }
+    }
+}
+```
+
+对于Backup 的配置可以参考前一节中的相应配置。在LVS 和Keepalived 环境里面，LVS 主要的工作是提供调度算法，把客户端请求按照需求调度在RealServer 中，Keepalived 主要的工作是提供LVS 控制器的一个冗余，并且对RealServer 进行健康检查，发现不健康的RealServer 就把它从LVS 集群中剔除，RealServer 只负责提供服务。  
+通常在LVS 的VS/DR 模式下需要在RealServer 上配置VIP。原因在于当LVS 把客户端的包转发给RealServer 时，因为包的目的IP 地址是VIP，如果RealServer 收到这个包后发现包的目的地址不是自己系统的IP，会认为这个包不是发给自己的，就会丢弃这个包，所以需要将这个IP 地址绑定到网卡下。当发送应答包给客户端时，RealServer 就会把包的源和目的地址调换，直接回复给客户端。下面为所有的RealServer 的lo:0 网卡创建启动脚本（vim /opt/realserver.sh）绑定VIP 地址，详细内容如下：
+```bash
+#!/bin/bash
+VIP=192.168.0.10
+/etc/rc.d/init.d/functions
+
+case "$1" in
+start)
+    /sbin/ifconfig lo:0 $VIP netmask 255.255.255.255 broadcast $VIP
+    /sbin/route add -host $VIP dev lo:0
+    echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+    echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+    sysctl -p >/dev/null 2>&1
+    echo "RealServer Start Ok"
+;;
+stop)
+    /sbin/ifconfig lo:0 down
+    /sbin/route del -host $VIP dev lo:0
+    echo "0" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+    echo "0" >/proc/sys/net/ipv4/conf/lo/arp_announce
+    echo "0" >/proc/sys/net/ipv4/conf/all/arp_ignore
+    echo "0" >/proc/sys/net/ipv4/conf/all/arp_announce
+;;
+status)
+    islothere=`/sbin/ifconfig lo:0 | grep $VIP | wc -l`
+    isrothere=`netstat -rn | grep "lo:0"|grep $VIP | wc -l`
+    if [ $islothere -eq 0 ]
+    then
+        if [ $isrothere -eq 0 ]
+        then
+            echo "LVS of RealServer Stopped."
+        else
+            echo "LVS of RealServer Running."
+        fi
+    else
+        echo "LVS of RealServer Running."
+    fi
+;;
+*)
+    echo "Usage:$0{start|stop}"
+    exit 1
+;;
+esac
+```
+
+注意上面绑定VIP 的掩码是255.255.255.255，说明广播地址是其自身，那么它就不会将ARP 发送到实际的自己该属于的广播域了，这样防止与LVS 上的VIP 冲突进而导致IP 地址冲突。为/opt/realserver.sh 文件添加可执行权限后，运行/opt/realserver.sh start 命令之后可以通过ip add show 命令查看lo:0 网卡的状态，注意与Keepalived 节点的网卡状态进行区分。
+```bash
+[root@node1 keepalived]# ip add show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+    inet 192.168.0.10/32 brd 10.198.197.74 scope global lo:0
+    inet6 ::1/128 scope host
+        valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc pfifo_fast state UP
+    qlen 1000
+    link/ether fa:16:3e:5e:7a:f7 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.2/18 brd 10.198.255.255 scope global eth0
+    inet6 fe80::f816:3eff:fe5e:7af7/64 scope link
+        valid_lft forever preferred_lft forever
+```

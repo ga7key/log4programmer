@@ -1264,3 +1264,235 @@ Cache-Control: no-cache
 
 <span style="color: red;font-weight: hold;">Tips</span>：如果两个或多个Policy 都作用到同一个交换器或者队列上，且这些Policy 的优先级都是一样的，则参数项最多的Policy 具有决定权。如果参数一样多，则最后添加的Policy 具有决定权。
 
+
+## RabbitMQ 扩展
+### 消息追踪
+出现消息异常丢失的情况：
+1. 生产者与Broker 断开了连接并且也没有任何重试机制；
+2. 消费者在处理消息时发生了异常，不过却提前进行了ack；
+3. 交换器并没有与任何队列进行绑定，生产者感知不到或者没有采取相应的措施；
+4. 集群策略也可能导致消息的丢失。
+
+#### Firehose
+Firehose 可以记录每一次发送或者消费消息的记录，方便RabbitMQ 的使用者进行调试、排错等。
+
+Firehose 的原理是将生产者投递给RabbitMQ 的消息，或者RabbitMQ 投递给消费者的消息按照指定的格式发送到默认的交换器上。  
+这个默认的交换器的名称为amq.rabbitmq.trace，它是一个topic 类型的交换器。  
+发送到这个交换器上的消息的路由键为publish.{exchangename}和deliver.{queuename}。其中exchangename 和queuename 为交换器和队列的名称，分别对应生产者投递到交换器的消息和消费者从队列中获取的消息。
+
+开启Firehose 命令：rabbitmqctl trace_on [-p vhost]  
+其中[-p vhost]是可选参数，用来指定虚拟主机vhost。  
+关闭Firehose 命令：rabbitmqctl trace_off [-p vhost]  
+Firehose 默认情况下处于关闭状态，并且Firehose 的状态也是非持久化的，会在RabbitMQ 服务重启的时候还原成默认的状态。Firehose 开启之后多少会影响RabbitMQ 整体服务的性能，因为它会引起额外的消息生成、路由和存储。
+
+###### Firehose 的用法
+首先确保Firehose 处于开启状态。然后创建7 个队列：queue、queue.another、queue1、queue2、queue3、queue4 和queue5。之后再创建2 个交换器exchange 和exchange.another，分别通过路由键rk 和rk.another 与queue 和queue.another 进行绑定。最后将amq.rabbitmq.trace 这个关键的交换器与queue1、queue2、queue3、queue4 和queue5 绑定，详细示意图如下：  
+![firehose_structure](../images/rabbitmq/2024-04-04_firehose_structure.png)  
+分别用客户端向exchange 和exchange.another 中发送一条消息“trace test payload.”，然后再用客户端消费队列queue 和queue.another 中的消息。  
+此时queue1 中有2 条消息，queue2 中有2 条消息，queue3 中有4 条消息，而queue4 和queue5 中只有1 条消息。在向exchange 发送1 条消息后，amq.rabbitmq.trace 分别向queue1、queue3 和queue4 发送1 条内部封装的消息。同样，在向exchange.another 中发送1 条消息之后，对应的队列queue1 和queue3 中会多1 条消息。消费队列queue 的时候，queue2、queue3 和queue5 中会多1 条消息；消费队列queue.another 的时候，queue2 和queue3 会多1 条消息。“publish.#” 匹配发送到所有交换器的消息，“deliver.#”匹配消费所有队列的消息，而“#”则包含了“publish.#” 和“deliver.#”。
+
+在Firehose 开启状态下，当有客户端发送或者消费消息时，Firehose 会自动封装相应的消息体，并添加详细的headers 属性。对于前面的将“trace test payload.”这条消息发送到交换器exchange 来说，Firehore 会将其封装成如下图所示的内容。  
+![firehose_publish_message](../images/rabbitmq/2024-04-04_firehose_publish_message.png)  
+在消费queue 时，会将这条消息封装成如下图所示的内容：  
+![firehose_delivery_message](../images/rabbitmq/2024-04-04_firehose_delivery_message.png)  
+headers 中的exchange_name 表示发送此条消息的交换器；routing_keys 表示与exchange_name 对应的路由键列表； properties 表示消息本身的属性， 比如delivery_mode 设置为2 表示消息需要持久化处理。
+
+#### rabbitmq_tracing 插件
+rabbitmq_tracing 插件相当于Firehose 的GUI 版本，它同样能跟踪RabbitMQ 中消息的流入流出情况。rabbitmq_tracing 插件同样会对流入流出的消息进行封装，然后将封装后的消息日志存入相应的trace 文件之中。
+
+可以使用以下命令来启动rabbitmq_tracing 插件：  
+```bash
+[root@node1 ~]# rabbitmq-plugins enable rabbitmq_tracing
+The following plugins have been enabled:
+rabbitmq_tracing
+Applying plugin configuration to rabbit@node3... started 1 plugin.
+# 关闭rabbitmq_tracing插件的命令
+rabbitmq-plugins disable rabbitmq_tracing
+```
+
+在添加rabbitmq_tracing 插件之后，Web 管理界面“Admin”右侧会多出“Tracing”这一项内容，可以在此Tab 项中添加相应的trace，如下所示：  
+![tracing_add_trace](../images/rabbitmq/2024-04-04_tracing_add_trace.png)  
+- Name：就是为即将创建的trace 任务取个名称。
+- Format：表示输出的消息日志格式，有Text 和JSON 两种，Text 格式的日志方便人类阅读，JSON 的格式方便程序解析。JSON 格式的payload（消息体）默认会采用Base64 进行编码，如上面的“trace test payload.”会被编码成“dHJhY2UgdGVzdCBwYXlsb2FkLg==”
+- Max payload bytes：表示每条消息的最大限制，单位为B。比如设置了此值为10，那么当有超过10B 的消息经过RabbitMQ 流转时，在记录到trace 文件时会被截断。如上Text 日志格式中“trace test payload.”会被截断成“trace test”。
+- Pattern：用来设置匹配的模式，和Firehose 的类似。如“#”匹配所有消息流入流出的情况，即当有客户端生产消息或者消费消息的时候，会把相应的消息日志都记录下来；“publish.#”匹配所有消息流入的情况；“deliver.#”匹配所有消息流出的情况。
+
+在添加完trace 之后，会根据匹配的规则将相应的消息日志输出到对应的trace 文件之中，文件的默认路径为/var/tmp/rabbitmq-tracing。可以在页面中直接点击“Trace log files”下面的列表直接查看对应的日志文件。
+
+如下显示添加了两个trace 任务，之后会发现多了两个队列，每个队列所绑定的交换器就是amq.rabbitmq.trace，由此可以看出整个rabbitmq_tracing 插件和Firehose 在实现上如出一辙，只不过rabbitmq_tracing 插件比Firehose 多了一层GUI 的包装，更容易使用和管理。  
+![tracing_usage](../images/rabbitmq/2024-04-04_tracing_usage.png)
+
+#### 案例：可靠性检测
+一个交换器通过同一个路由键绑定多个队列，生产者客户端采用同一个路由键发送消息到这个交换器中，检测其所绑定的队列中是否有消息丢失。
+
+- 具体测试案例准备细节
+1. 在RabbitMQ 集群开启rabbitmq_tracing 插件。
+2. 创建1 个交换器exchange 和3 个队列：queue1、queue2、queue3，都用同一个路由键“rk”进行绑定。
+3. 创建3 个trace：trace1、trace2、trace3 分别，采用“#.queue1”、“#.queue2”、“#.queue3”的Pattern 来追踪从队列queue1、queue2、queue3 中消费的消息。
+4. 创建1 个trace：trace_publish 采用publish.exchange 的Pattern 来追踪流入交换器exchange 的消息。
+
+- 验证过程
+1. 开启1 个生产者线程，然后持续发送消息至交换器exchange。消息的格式为“当前时间戳+自增计数”，如“1506067447530-726”，这样在检索到相应数据丢失时可以快速在trace 日志中找到大致的地方。注意设置mandatory 参数，防止消息路由不到对应的队列而造成对消息丢失的误判。在消息发送之前需要将消息以[msg,QUEUE_NUM]的形式存入一个全局的msgMap 中，用来在消费端做数据验证。这里的QUEUE_NUM 为3，对应创建的3 个队列。  
+对应的内部生产者线程类的细节如下，注意代码里的存储消息的动作一定要在发送消息之前，如果在代码中调换顺序，生产者线程在发送完消息之后，并抢占到msgMap 的对象锁之前，消费者就有可能消费到相应的数据，此时msgMap 中并没有相应的消息，这样会误报错误。
+```java
+/* ProducerThread */
+private static HashMap<String, Integer> msgMap = new HashMap<String, Integer>();
+//log2disk 是用来记录测试程序的log 日志的，当然可以使用log4j 或logback 等替代
+private static BlockingQueue<String> log2disk = new
+LinkedBlockingQueue<String>();
+public static class ProducerThread implements Runnable {
+    private Connection connection;
+    public ProducerThread(Connection connection) {
+        this.connection = connection;
+    }
+    public void run() {
+        try {
+            Channel channel = connection.createChannel();
+            channel.addReturnListener(new ReturnListener() {
+            public void handleReturn(int replyCode, String replyText, String exchange, String routingKey,
+             AMQP.BasicProperties properties, byte[] body) throws IOException {
+                String errorInfo = "Basic.Return: " + new String(body)+"\n";
+                try {
+                    log2disk.put(errorInfo);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println(errorInfo);
+            }
+            });
+            int count=0;
+            while (true) {
+                String message = new Date().getTime() + "-" + count++;
+                synchronized (msgMap){
+                    msgMap.put(message, QUEUE_NUM);
+                }
+                channel.basicPublish(exchange, routingKey, true, MessageProperties.PERSISTENT_TEXT_PLAIN, message.getBytes());
+                try {
+                    //QPS=10，这里的QPS 限定可以自适应调节
+                    //当然QPS 不宜过高，防止队列堆积严重
+                    TimeUnit.MILLISECONDS.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+2. 开启3 个消费者线程分别消费队列queue1、queue2、queue3 的消息，从存储的msgMap 中寻找是否有相应的消息。如果有，则将消息对应的value 计数减1，如果value 计数为0，则从Map 中删除此条消息；如果没有找到这条消息则报错。对应的内部消费线程类的实现细节如下：
+```java
+/* ConsumerThread */
+public static class ConsumerThread implements Runnable {
+    private Connection connection;
+    private String queue;
+    public ConsumerThread(Connection connection, String queue) {
+        this.connection = connection;
+        this.queue = queue;
+    }
+    public void run() {
+        try {
+            final Channel channel = connection.createChannel();
+            channel.basicQos(64);
+            channel.basicConsume(this.queue, new DefaultConsumer(channel) {
+                public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties,
+                byte[] body) throws IOException{
+                    String msg = new String(body);
+                    synchronized (msgMap) {
+                        if (msgMap.containsKey(msg)) {
+                            int count = msgMap.get(msg);
+                            count--;
+                            if (count > 0) {
+                                msgMap.put(msg, count);
+                            } else {
+                                msgMap.remove(msg);
+                            }
+                        } else {
+                            String errorInfo = "unknown msg : " + msg+"\n";
+                            try {
+                                log2disk.put(errorInfo);
+                                System.out.println(errorInfo);
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                    channel.basicAck(envelope.getDeliveryTag(), false);
+                }
+            });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+3. 开启一个检测进程，每隔10 分钟检测msgMap 中的数据。由前面的描述可知msgMap 中的键就是消息，而消息中有时间戳的信息，那么可以将这个时间戳与当前的时间戳进行对比，如果发现差值超过10 分钟，这说明可能有消息丢失。这个结论的前提是队列中基本没有堆积，并且前面的生产和消费代码同时运行时可以保证消费消息的速度不会低于生产消息的速度。对应的检测程序代码如下：
+```java
+/* DetectThread */
+public static class DetectThread implements Runnable {
+    public void run() {
+        while (true) {
+            try {
+                TimeUnit.MINUTES.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            synchronized (msgMap) {
+                if (msgMap.size() > 0) {
+                    long now = new Date().getTime();
+                    for (Map.Entry<String, Integer> entry : msgMap.entrySet()) {
+                        String msg = entry.getKey();
+                        if (now - parseTime(msg) >= 10 * 60 * 1000) {
+                            String findLossInfo = "We find loss msg:" + msg + " ,now the time is: " + now 
+                            + ", and this msg still has " + entry.getValue()+" missed"+"\n";
+                            try {
+                                log2disk.put(findLossInfo);
+                                System.out.println(findLossInfo);
+                                msgMap.remove(msg);
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    public static Long parseTime(String msg) {
+        int index = msg.indexOf('-');
+        String timeStr = msg.substring(0, index);
+        Long time = Long.parseLong(timeStr);
+        return time;
+    }
+}
+```
+
+如果检测到msgMap 中有消息超过10 分钟没有被处理，此时还不能证明有数据丢失，这里就需要用到了trace。如果看到[msg,count]这条数据中有以下情况：
+- 考虑count=3 的情况。需要检索trace 文件trace_publish.log 来进一步验证。如果trace_publish.log 中没有搜索到相应的消息则说明消息未发生到交换器exchange 中；如果trace_publish.log 中检索到相应的消息，那么可以进一步检索trace1.log、trace2.log 和trace3.log 来进行验证，如果这3 个trace 文件中不是全部都有此条消息，则验证了本节开头所述的消息丢失现象。
+- 考虑0 \< count \<3 的情况。需要检索trace1.log、trace2.log 和trace3.log 来进一步验证，如果这3 个trace 文件中不是全部都有此条消息，则验证了本节开篇所述的消息丢失问题。
+- 考虑count=0 的情况。说明检测程序正常，可以忽略。
+
+这里补充主线程的部分代码如下所示。注意这里有个PrintLogThread 的线程，此线程主要用来读取log2disk 这个BlockingQueue 中所存储的异常日志然后进行存盘处理，当然这个功能完全可以用log4j 或者logback 等第三方日志工具替代。
+```java
+/* 主线程部分代码展示 */
+Connection connection = connectionFactory.newConnection();
+PrintLogThread printLogThread = new PrintLogThread(logFileAddr);
+ProducerThread producerThread = new ProducerThread(connection);
+ConsumerThread consumerThread1 = new ConsumerThread(connection, “queue1”);
+ConsumerThread consumerThread2 = new ConsumerThread(connection, “queue2”);
+ConsumerThread consumerThread3 = new ConsumerThread(connection, “queue3”);
+DetectThread detectThread = new DetectThread();
+System.out.println("starting check msg loss....");
+ExecutorService executorService = Executors.newCachedThreadPool();
+executorService.submit(printLogThread);
+executorService.submit(producerThread);
+executorService.submit(consumerThread1);
+executorService.submit(consumerThread2);
+executorService.submit(consumerThread3);
+executorService.submit(detectThread);
+executorService.shutdown();
+```
+

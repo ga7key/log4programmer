@@ -42,6 +42,18 @@ BeanDefinition类继承图
 ### bean加载流程
 ![bean加载](../images/spring/2023-09-22_bean加载.png)
 
+### bean的作用域
+Spring 中定义了多种 Bean 的作用域，用来控制 Bean 实例在容器中的生命周期和可见范围。以下是 Spring 提供的主要作用域：
+
+1. singleton（单例）： 这是默认的作用域。在 Spring IoC 容器中，对于一个指定的 Bean 定义，容器只会创建一个共享的实例，并且所有对这个 Bean 的请求都会返回这个唯一的实例。这意味着在整个 ApplicationContext 生命周期内，单例 Bean 只会被初始化一次。
+2. prototype（原型）： 对于 prototype 作用域的 Bean，Spring IoC 容器在每次客户端请求时都会创建一个新的 Bean 实例。因此，每次通过 getBean() 方法请求一个 prototype 类型的 Bean 时，容器都会生成一个新的对象实例。
+3. request： 在 Web 应用程序环境下，每次 HTTP 请求都会创建一个新的 Bean 实例，请求完成后，该 Bean 就会被销毁。此作用域仅适用于 Web-aware Spring ApplicationContexts，例如 WebApplicationContext。
+4. session： 同样仅适用于 Web 应用程序环境，对于每个 HTTP Session，Spring 容器会为该 Session 创建一个单独的 Bean 实例，该实例仅在该 Session 内有效，当 Session 被废弃时，相应的 Bean 实例也会被销毁。
+5. global session： 类似于 session 作用域，但主要用于portlet环境，这里的全局 Session 是指portlet容器的概念，而不是标准的HTTP Session。
+6. application 或者 singleton（在Servlet环境中的另一种表述方式）： 在 Servlet 环境中，有时也被称为 "application scope"，这样的 Bean 实例在全局的 ServletContext 范围内只有一个实例，即在整个 Web 应用生命周期内只创建一次，所有用户共享。
+
+注意，request、session 和 global session 这三个作用域只在基于 Web 的 Spring 应用程序中适用，如果你使用的不是 WebApplicationContext，那么这些作用域是不可用的。而在非 Web 应用程序或普通的 Spring 应用程序中，主要关注的是 singleton 和 prototype 两种作用域。
+
 ### 注解
 
 ##### 注解的本质

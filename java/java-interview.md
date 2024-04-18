@@ -100,3 +100,110 @@ public class FinallyTest {
 在转去之前，try 中先把要返回的结果存放到不同于 x 的局部变量中去，执行完 finally 之后，在从中取出返回结果。  
 因此，即使 finally 中对变量 x 进行了改变，但是不会影响返回结果（返回值保存在栈中了）。
 
+### 父子类执行顺序
+Java 中，new 一个类的对象，类里面的静态代码块、非静态代码、无参构造方法、有参构造方法、类的一般方法等部分，它们的执行顺序相对来说比较简单，用程序也很容易验证。比如新建一个测试父类。
+
+```java
+public class FatherTest {
+
+    private String name;
+
+    FatherTest(){
+       System.out.println ("-- 父类的无参构造函数 --");
+    }
+
+    FatherTest(String name){
+       this.name=name;
+       System.out.println ("-- 父类的有参构造函数 --"+this.name);
+    }
+
+    static{
+       System.out.println ("-- 父类的静态代码块 --");
+    }
+
+    {
+       System.out.println ("-- 父类的非静态代码块 --");
+    }
+
+    public void speak(){
+       System.out.println ("-- 父类的方法 --");
+    }
+}
+//用main()方法调用FatherTest类
+public static void main(String[] args) {
+    System.out.println ("-- 父类主程序 --");
+    FatherTest father=new FatherTest ("父亲的名字");
+    father.speak();
+}
+```
+
+执行结果为：
+
+    -- 父类的静态代码块 --
+    -- 父类主程序 --
+    -- 父类的非静态代码块 --
+    -- 父类的有参构造函数 -- 父亲的名字
+    -- 父类的方法 --
+
+执行顺序如下：  
+静态代码块 — 主程序 — 非静态代码块 — 构造函数 — 一般方法
+
+如果加入子类的继承以后，情况就会变得复杂些。比如再新建一个测试子类。
+
+```java
+public class SonTest extends FatherTest {
+
+    private String name;
+
+    static{
+       System.out.println ("-- 子类的静态代码块 --");
+    }
+
+    {
+       System.out.println ("-- 子类的非静态代码块 --");
+    }
+
+    SonTest(){
+       System.out.println ("-- 子类的无参构造函数 --");
+    }
+
+    SonTest(String name){
+       this.name=name;
+       System.out.println ("-- 子类的有参构造函数 --"+this.name);
+    }
+
+    @Override
+    public void speak(){
+       System.out.println ("-- 子类 Override 了父类的方法 --");
+    }  
+}
+//用main()方法调用FatherTest类和SonTest类
+public static void main(String[] args) {
+       System.out.println ("-- 子类主程序 --");
+
+       FatherTest father=new FatherTest ("父亲的名字");
+       father.speak();
+
+       SonTest son=new SonTest ("儿子的名字");
+       son.speak();
+}
+```
+
+执行结果为：
+
+    -- 父类的静态代码块 --
+    -- 子类的静态代码块 --
+    -- 子类主程序 --
+    -- 父类的非静态代码块 --
+    -- 父类的有参构造函数 -- 父亲的名字
+    -- 父类的方法 --
+    -- 父类的非静态代码块 --
+    -- 父类的无参构造函数 --
+    -- 子类的非静态代码块 --
+    -- 子类的有参构造函数 -- 儿子的名字
+    -- 子类 Override 了父类的方法 --
+
+加入了子类以后，执行顺序有了新的变化：  
+1. 首先执行的是 父类的静态代码块 — 子类的静态代码块 — 主程序。这一部分都是执行一次，与建立多少对象没有关系。
+2. 新建了一个父类对象，并调用speak()方法。执行了 父类的非静态代码块 — 构造函数 — 一般方法。
+3. 新建了一个子类的对象，并调用speak()方法。执行了 父类的非静态代码块 — 父类的无参构造函数，然后是 子类的非静态代码块 — 子类构造函数 — 子类的方法。

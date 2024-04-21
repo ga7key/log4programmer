@@ -1,4 +1,5 @@
 > 基于Redis 2.9，适用于Redis 2.6至Redis 3.0
+> 摘抄自《Redis设计与实现》 黄健宏 著
 
 ## 发布与订阅
 Redis的发布与订阅功能由PUBLISH、SUBSCRIBE、PSUBSCRIBE等命令组成。  

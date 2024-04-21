@@ -1,4 +1,5 @@
 > 基于Redis 2.9，适用于Redis 2.6至Redis 3.0
+> 摘抄自《Redis设计与实现》 黄健宏 著
 
 ## 复制
 在Redis中，用户可以通过执行SLAVEOF命令或者设置slaveof选项，让一个服务器去复制（replicate）另一个服务器，我们称呼被复制的服务器为主服务器（master），而对主服务器进行复制的服务器则被称为从服务器（slave）。

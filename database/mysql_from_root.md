@@ -48,3 +48,21 @@ net stop MySQL
 ```
 
 #### 启动MySQL客户端程序
+
+```bash
+mysql -h主机名 -u用户名 -p密码
+```
+
+- -h 表示服务器进程所在计算机的域名或者IP地址，如果服务器进程就运行在本机的话，可以省略这个参数，或者填localhost或者127.0.0.1。也可以写作 --host=主机名的形式。
+- -u 表示用户名。也可以写作 --user=用户名的形式。
+- -p 表示密码。也可以写作 --password=密码的形式。
+
+断开客户端与服务器的连接并且关闭客户端的命令：
+
+```mysql
+quit
+exit
+\q
+```
+
+<span style="color: red;font-weight: bold;">Tips</span>：  

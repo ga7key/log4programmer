@@ -1,4 +1,4 @@
-> RabbitMQ 版本为3.6.10
+> RabbitMQ 版本为3.6.10  
 > 摘抄自《RabbitMQ实战指南》 朱忠华 著
 
 ### RabbitMQ的优点

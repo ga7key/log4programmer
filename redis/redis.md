@@ -1,4 +1,4 @@
-> 基于Redis 2.9，适用于Redis 2.6至Redis 3.0
+> 基于Redis 2.9，适用于Redis 2.6至Redis 3.0  
 > 摘抄自《Redis设计与实现》 黄健宏 著
 
 ## 数据结构

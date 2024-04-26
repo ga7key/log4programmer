@@ -1,2 +1,2 @@
-* [数据结构](algorithm/dataStructure.md)
-* [常见算法](algorithm/common.md)
+* [循环遍历](algorithm/foreach.md)
+* [算法秘籍](algorithm/labuladong.md)

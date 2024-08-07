@@ -3,3 +3,4 @@
 * [并发](java/concurrent.md)
 * [JDK新特性](java/jdk-features.md)
 * [Java面试](java/java-interview.md)
+* [常用方法](java/common.md)

@@ -123,3 +123,32 @@ public void dealDate() {
 }
 ```
 
+###  logback-spring.xml
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+	<property name="LOG_HOME" value="./logs" />
+	<appender name="consoleAppender" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>[TraceId:%X{traceId}] %d %-5level [%thread] %logger{120} - %msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<appender name="defaultAppender" class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<file>${LOG_HOME}/gackey.log</file>
+		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<fileNamePattern>${LOG_HOME}/gackey.%d{yyyy-MM-dd}.log</fileNamePattern>
+			<maxHistory>365</maxHistory>
+		</rollingPolicy>
+		<encoder>
+			<pattern>[TraceId:%X{traceId}] %d %-5level [%thread] %logger{120} - %msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<root level="info">
+		<appender-ref ref="consoleAppender" />
+		<appender-ref ref="defaultAppender" />
+	</root>
+</configuration>
+```

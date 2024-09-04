@@ -1,5 +1,6 @@
 * [Spring Cloud](springcloud/alibaba.md)
 * [Java](java/JVM.md)
+* [Rust](rust/overview.md)
 * [数据库](database/mysql_from_root.md)
 * [算法](algorithm/foreach.md)
 * [设计模式](designPattern/object-oriented_programming.md)

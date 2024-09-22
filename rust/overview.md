@@ -18,3 +18,71 @@ Rust编译器的版本号采用了“语义化版本号”​（Semantic Version
 ❏ stable版本：正式版，每隔6个星期发布一个新版本，一些实验性质的新功能在此版本上无法使用。它也是最稳定、最可靠的版本。
 
 <span style="color: red;font-weight: bold;">※</span> 在nightly版本中使用试验性质的功能，必须手动开启feature gate。就是要在当前项目的入口文件中加入一条#! [feature(…name…)]语句。否则是编译不过的。等到该功能正式发布，stable版本会警告你可以去掉这个feature gate了。
+
+### 安装开发环境
+
+在官网上下载rustup-init程序，以命令行形式安装。  
+在Windows平台上，Rust支持两种形式的ABI（Application Binary Interface）​，一种是原生的MSVC版本，另一种是GNU版本。MSVC版本与Windows兼容性更好，但是需要下载VisualC++的工具链，详细内容可以参考[rustup文档](https://rust-lang.github.io/rustup/installation/windows.html)。  
+安装完成之后，在$HOME/.cargo/bin文件夹下可以看到一系列的可执行程序：rustc.exe是编译器，cargo.exe是包管理器，cargo-fmt.exe和rustfmt.exe是源代码格式化工具，rust-gdb.exe和rust-lldb.exe是调试器，rustdoc.exe是文档生成器，rls.exe和racer.exe是为编辑器准备的代码提示工具，rustup.exe是管理这套工具链下载更新的工具。  
+
+###### 用rustup管理工具链
+
+```rust
+    // 更新rustup本身
+    $ rustup self update
+    // 卸载rust所有程序
+    $ rustup self uninstall
+    // 更新工具链
+    $ rustup update
+    // 安装nightly版本的编译工具链
+    $ rustup install nightly
+    // 设置默认工具链是nightly版本
+    $ rustup default nightly
+```
+
+###### 设置环境变量
+
+为了提高访问速度，中国科技大学Linux用户协会（USTC LUG）提供了一个代理服务，其官方网址为<https://lug.ustc.edu.cn/wiki/mirrors/help/rust-static>  
+
+```shell
+    export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
+    export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
+```
+
+###### 远程仓库
+
+Rust官方工具链还提供了重要的包管理工具cargo.exe，通过这个工具轻松导入或者发布开源库。官方的管理仓库在<https://crates.io/>。大型项目往往需要依赖这些开源库，cargo会帮我们自动下载编译。  
+为了解决网络问题，需要利用USTC提供的代理服务，使用方式为，在$HOME/.cargo目录下创建一个名为config的文本文件，其内容为：  
+
+```rust
+    [source.crates-io]
+    registry = "https://github.com/rust-lang/crates.io-index"
+    replace-with = 'ustc'
+    [source.ustc]
+    registry = "git://mirrors.ustc.edu.cn/crates.io-index"
+```
+
+###### RLS
+
+RLS（Rust Language Server）是官方提供的一个开源的标准化的编辑器增强工具。项目地址在<https://github.com/rust-lang-nursery/rls>。它是一个单独的进程，通过进程间通信给编辑器或者集成开发环境提供一些信息，实现比较复杂的功能，比如代码自动提示、跳转到定义、显示函数签名等。安装最新的RLS的方法为：  
+
+```rust
+    // 更新rustup到最新
+    rustup self update
+    // 更新rust编译器到最新的nightly版本
+    rustup update nightly
+    // 安装RLS
+    rustup component add rls --toolchain nightly
+    rustup component add rust-analysis --toolchain nightly
+    rustup component add rust-src --toolchain nightly
+```
+
+###### Rust的帮助命令
+
+1. 使用rustc -h命令查看rustc的基本用法；  
+2. 使用cargo -h命令查看cargo的基本用法；  
+3. 使用rustc -C help命令查看rustc的一些跟代码生成相关的选项；  
+4. 使用rustc -W help命令查看rustc的一些跟代码警告相关的选项；  
+5. 使用rustc -Z help命令查看rustc的一些跟编译器内部实现相关的选项；  
+6. 使用rustc -help -V命令查看rustc的更详细的选项说明。  
+

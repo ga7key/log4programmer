@@ -24,6 +24,12 @@ Rust编译器的版本号采用了“语义化版本号”​（Semantic Version
 在官网上下载rustup-init程序，以命令行形式安装。  
 在Windows平台上，Rust支持两种形式的ABI（Application Binary Interface）​，一种是原生的MSVC版本，另一种是GNU版本。MSVC版本与Windows兼容性更好，但是需要下载VisualC++的工具链，详细内容可以参考[rustup文档](https://rust-lang.github.io/rustup/installation/windows.html)。  
 安装完成之后，在$HOME/.cargo/bin文件夹下可以看到一系列的可执行程序：rustc.exe是编译器，cargo.exe是包管理器，cargo-fmt.exe和rustfmt.exe是源代码格式化工具，rust-gdb.exe和rust-lldb.exe是调试器，rustdoc.exe是文档生成器，rls.exe和racer.exe是为编辑器准备的代码提示工具，rustup.exe是管理这套工具链下载更新的工具。  
+<span style="color: red;font-weight: bold;">※</span> 如果想指定Rust的安装位置，在运行rustup-init程序前，需要在系统变量添加如下变量：
+
+```shell
+    CARGO_HOME=C:\Develop\Rust\.cargo
+    RUSTUP_HOME=C:\Develop\Rust\.rustup
+```
 
 ###### 用rustup管理工具链
 
@@ -77,12 +83,12 @@ RLS（Rust Language Server）是官方提供的一个开源的标准化的编辑
     rustup component add rust-src --toolchain nightly
 ```
 
-###### Rust的帮助命令
+### Rust的帮助命令
 
-1. 使用rustc -h命令查看rustc的基本用法；  
-2. 使用cargo -h命令查看cargo的基本用法；  
-3. 使用rustc -C help命令查看rustc的一些跟代码生成相关的选项；  
-4. 使用rustc -W help命令查看rustc的一些跟代码警告相关的选项；  
-5. 使用rustc -Z help命令查看rustc的一些跟编译器内部实现相关的选项；  
-6. 使用rustc -help -V命令查看rustc的更详细的选项说明。  
+1. rustc -h ：查看rustc的基本用法；  
+2. cargo -h ：查看cargo的基本用法；  
+3. rustc -C help ：查看rustc的一些跟代码生成相关的选项；  
+4. rustc -W help ：查看rustc的一些跟代码警告相关的选项；  
+5. rustc -Z help ：查看rustc的一些跟编译器内部实现相关的选项；  
+6. rustc --help -V ：查看rustc的更详细的选项说明。  
 

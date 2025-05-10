@@ -42,7 +42,7 @@
 
 
 ### 服务端口号
-服务与端口号的映射关系excel文件：[service_port](../files/others/service-names-port-numbers.xlsx)
+服务与端口号的映射关系excel文件：[service_port](https://ga7key.github.io/log4programmer/files/others/service-names-port-numbers.xlsx)
 
 https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml
 
